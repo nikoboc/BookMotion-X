@@ -1,3 +1,5 @@
 # Shell launchers must stay LF so macOS can execute them.
 *.command text eol=lf
 *.sh text eol=lf
+# Windows batch files want CRLF.
+*.bat text eol=crlf

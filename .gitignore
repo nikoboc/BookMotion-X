@@ -16,5 +16,11 @@ __pycache__/
 .venv/
 venv/
 
+# PyInstaller build artifacts
+build/
+dist/
+*.spec
+.buildvenv/
+
 # Local app config (contains the Notion token) — keep config.example.json only
 config.json

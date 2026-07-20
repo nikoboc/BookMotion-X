@@ -40,16 +40,27 @@ BROWSER_ORDER = ["chrome", "safari", "edge", "brave", "firefox", "chromium"]
 
 COLOR_JA = {"yellow": "黄色", "blue": "青", "pink": "ピンク", "orange": "オレンジ"}
 
-# config.json is looked for next to this script first (mac-app/config.json),
-# then ~/.kindle-notion/config.json. New files are created next to the script.
 SCRIPT_DIR = Path(__file__).resolve().parent
 LOCAL_CONFIG = SCRIPT_DIR / "config.json"
 HOME_CONFIG = Path.home() / ".kindle-notion" / "config.json"
-_config_path: Path | None = None
+_EMPTY = {"notion_token": "", "notion_parent_page_id": "", "notion_database_id": ""}
 
 
 # ---------------------------------------------------------------- config
-def _resolve_config_path() -> Path:
+def get_config_path() -> Path:
+    """Where config.json lives.
+
+    A packaged .app runs read-only from inside the bundle, so store config in
+    the user's Application Support instead. In dev, prefer a config.json next to
+    the script, then ~/.kindle-notion/config.json.
+    """
+    if getattr(sys, "frozen", False):  # packaged app
+        if sys.platform == "darwin":
+            base = Path.home() / "Library" / "Application Support" / "KindleNotion"
+        else:
+            base = Path.home() / ".kindle-notion"
+        base.mkdir(parents=True, exist_ok=True)
+        return base / "config.json"
     if LOCAL_CONFIG.exists():
         return LOCAL_CONFIG
     if HOME_CONFIG.exists():
@@ -58,34 +69,26 @@ def _resolve_config_path() -> Path:
 
 
 def load_config() -> dict:
-    global _config_path
-    _config_path = _resolve_config_path()
-    if not _config_path.exists():
-        _config_path.parent.mkdir(parents=True, exist_ok=True)
-        _config_path.write_text(
-            json.dumps(
-                {"notion_token": "", "notion_parent_page_id": "", "notion_database_id": ""},
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-        print(f"設定ファイルを作成しました: {_config_path}")
-        print("notion_token と notion_parent_page_id を記入して、もう一度実行してください。")
-        sys.exit(1)
-    return json.loads(_config_path.read_text(encoding="utf-8"))
+    p = get_config_path()
+    if not p.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(_EMPTY, ensure_ascii=False, indent=2), encoding="utf-8")
+        return dict(_EMPTY)
+    return json.loads(p.read_text(encoding="utf-8"))
 
 
 def save_config(cfg: dict) -> None:
-    _config_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    get_config_path().write_text(
+        json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 # ---------------------------------------------------------------- session / cookies
-def load_cookies(cookies_file: str | None, browser: str | None):
+def load_cookies(cookies_file, browser, log=print):
     if cookies_file:
         cj = MozillaCookieJar()
         cj.load(cookies_file, ignore_discard=True, ignore_expires=True)
-        print(f"cookies.txt から {len(cj)} 件のCookieを読み込みました")
+        log(f"cookies.txt から {len(cj)} 件のCookieを読み込みました")
         return cj
     import browser_cookie3
 
@@ -96,20 +99,20 @@ def load_cookies(cookies_file: str | None, browser: str | None):
         try:
             cj = fn(domain_name=DOMAIN)
             if len(cj) > 0:
-                print(f"{name} から {len(cj)} 件のCookieを読み込みました")
+                log(f"{name} から {len(cj)} 件のCookieを読み込みました")
                 return cj
         except Exception as e:
-            print(f"[info] {name}: {e}")
-    raise SystemExit(
+            log(f"[info] {name}: {e}")
+    raise RuntimeError(
         f"{DOMAIN} のCookieが見つかりませんでした。ブラウザで {BASE} にログインするか、"
-        "--cookies-file でエクスポート済みCookieを指定してください。"
+        "cookies.txt を指定してください。"
     )
 
 
-def build_session(cookies_file: str | None, browser: str | None) -> requests.Session:
+def build_session(cookies_file, browser, log=print) -> requests.Session:
     s = requests.Session()
     s.headers.update({"User-Agent": UA, "Accept-Language": "ja,en;q=0.9"})
-    for c in load_cookies(cookies_file, browser):
+    for c in load_cookies(cookies_file, browser, log):
         s.cookies.set_cookie(c)
     return s
 
@@ -225,9 +228,9 @@ def fetch_all_books(session: requests.Session) -> list:
     """
     r = session.get(NOTEBOOK, timeout=30)
     if "signin" in r.url or "/ap/" in r.url:
-        raise SystemExit(
+        raise RuntimeError(
             "ログインしていません。ブラウザで read.amazon.co.jp にログインして再実行"
-            "（または --cookies-file を指定）してください。"
+            "（または cookies.txt を指定）してください。"
         )
     soup = BeautifulSoup(r.text, "html.parser")
     csrf_el = soup.select_one("input[name='anti-csrftoken-a2z']")
@@ -235,7 +238,7 @@ def fetch_all_books(session: requests.Session) -> list:
 
     books = parse_books(r.text)
     if not books:
-        raise SystemExit("本を取得できませんでした。ログイン状態を確認してください。")
+        raise RuntimeError("本を取得できませんでした。ログイン状態を確認してください。")
     token = _next_library_token(r.text)
 
     # Paginated endpoint for the remaining batches. It expects the CSRF token
@@ -269,15 +272,15 @@ def fetch_book_annotations(session: requests.Session, asin: str) -> list:
     return annotations
 
 
-def fetch_kindle(session: requests.Session, limit: int | None) -> list:
-    print("本一覧を取得中…")
+def fetch_kindle(session: requests.Session, limit, log=print) -> list:
+    log("本一覧を取得中…")
     books = fetch_all_books(session)
-    print(f"{len(books)} 冊を検出")
+    log(f"{len(books)} 冊を検出")
     if limit:
         books = books[:limit]
     for i, b in enumerate(books, 1):
         b["annotations"] = fetch_book_annotations(session, b["asin"])
-        print(f"({i}/{len(books)}) {b.get('title') or b['asin']} … {len(b['annotations'])} 件")
+        log(f"({i}/{len(books)}) {b.get('title') or b['asin']} … {len(b['annotations'])} 件")
     return books
 
 
@@ -417,27 +420,26 @@ def build_rows(books: list, today: str) -> list:
     return rows
 
 
-def notion_sync(cfg: dict, books: list, today: str) -> dict:
-    token = cfg["notion_token"]
-    db_id = normalize_id(cfg.get("notion_database_id") or "")
+def notion_sync(token, parent_page_id, database_id, books, today, log=print) -> dict:
+    """Push highlights to Notion. Returns a result dict incl. the database_id
+    used/created, so the caller can persist it."""
+    db_id = normalize_id(database_id or "")
     if not db_id:
-        parent = normalize_id(cfg.get("notion_parent_page_id") or "")
+        parent = normalize_id(parent_page_id or "")
         if not parent:
-            raise RuntimeError("notion_parent_page_id が未設定です。")
-        print("Notion データベースを作成中…")
+            raise RuntimeError("親ページID（または既存DB ID）が未設定です。")
+        log("Notion データベースを作成中…")
         db = create_database(token, parent)
         db_id = db["id"]
-        cfg["notion_database_id"] = db_id
-        save_config(cfg)
-        print("作成:", db.get("url"))
+        log("作成: " + (db.get("url") or db_id))
 
     ensure_schema(token, db_id)
     existing = query_existing_keys(token, db_id)
-    print(f"既存 {len(existing)} 件を確認")
+    log(f"既存 {len(existing)} 件を確認")
 
     rows = build_rows(books, today)
     fresh = [r for r in rows if r["key"] not in existing]
-    print(f"登録対象 {len(fresh)} 件（重複スキップ {len(rows) - len(fresh)} 件）")
+    log(f"登録対象 {len(fresh)} 件（重複スキップ {len(rows) - len(fresh)} 件）")
 
     ok = fail = 0
     min_interval = 0.34  # ~3 req/s
@@ -453,17 +455,46 @@ def notion_sync(cfg: dict, books: list, today: str) -> dict:
             ok += 1
         except Exception as e:
             fail += 1
-            print("  登録失敗:", e)
+            log("  登録失敗: " + str(e))
         if (i + 1) % 20 == 0 or i == len(fresh) - 1:
-            print(f"  Notion 登録 {i + 1}/{len(fresh)}（成功{ok}/失敗{fail}）")
+            log(f"  Notion 登録 {i + 1}/{len(fresh)}（成功{ok}/失敗{fail}）")
         dt = time.time() - t0
         if i < len(fresh) - 1 and dt < min_interval:
             time.sleep(min_interval - dt)
 
-    return {"total": len(rows), "inserted": ok, "failed": fail, "skipped": len(rows) - len(fresh)}
+    return {
+        "database_id": db_id,
+        "total": len(rows),
+        "inserted": ok,
+        "failed": fail,
+        "skipped": len(rows) - len(fresh),
+    }
 
 
-# ---------------------------------------------------------------- main
+def run_sync(cfg: dict, cookies_file=None, browser=None, limit=None, log=print) -> dict:
+    """End-to-end sync used by both the CLI and the GUI. Persists a newly
+    created database_id back into cfg + config.json."""
+    if not cfg.get("notion_token"):
+        raise RuntimeError("Notion トークンが未設定です。")
+    session = build_session(cookies_file, browser, log)
+    books = fetch_kindle(session, limit, log)
+    if not books:
+        raise RuntimeError("本が0冊でした。ログイン状態を確認してください。")
+    res = notion_sync(
+        cfg["notion_token"],
+        cfg.get("notion_parent_page_id"),
+        cfg.get("notion_database_id"),
+        books,
+        date.today().isoformat(),
+        log,
+    )
+    if not (cfg.get("notion_database_id") or "").strip():
+        cfg["notion_database_id"] = res["database_id"]
+        save_config(cfg)
+    return res
+
+
+# ---------------------------------------------------------------- main (CLI)
 def main() -> int:
     ap = argparse.ArgumentParser(description="Kindle highlights → Notion (browser-free)")
     ap.add_argument("-c", "--cookies-file", help="エクスポート済み cookies.txt")
@@ -473,16 +504,13 @@ def main() -> int:
 
     cfg = load_config()
     if not cfg.get("notion_token"):
-        print(f"config.json に notion_token を設定してください: {_config_path}")
+        print(f"config.json に notion_token を設定してください: {get_config_path()}")
         return 1
-
-    session = build_session(args.cookies_file, args.browser)
-    books = fetch_kindle(session, args.limit)
-    if not books:
-        print("本が0冊でした。ログイン状態を確認してください。")
+    try:
+        res = run_sync(cfg, args.cookies_file, args.browser, args.limit)
+    except RuntimeError as e:
+        print("エラー:", e)
         return 2
-
-    res = notion_sync(cfg, books, date.today().isoformat())
     print(
         f"完了: 対象 {res['total']} / 新規 {res['inserted']} / "
         f"重複 {res['skipped']} / 失敗 {res['failed']}"

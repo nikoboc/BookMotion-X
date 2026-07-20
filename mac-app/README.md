@@ -36,12 +36,31 @@ Kindle のハイライト（`read.amazon.co.jp/notebook`）を取得して Notio
 - 探索順は **`mac-app/config.json` → 無ければ `~/.kindle-notion/config.json`**
 - `config.json` は `.gitignore` 済み（トークンはコミットされません。`config.example.json` は見本）
 
-### 3. 実行
+### 3. 実行（3つの方法）
 
-**Finder で `run.command` をダブルクリック**。初回だけ venv と依存を自動セットアップ→実行します。
+**方法1: GUIアプリ（おすすめ）**
+- `python3 gui.py`（またはビルドした `KindleNotion.app`）を起動
+- 窓に **トークン / 親ページURL / cookies.txt** を入力 → 「保存」→「Notion へ同期」
+- ファイル編集不要。ログも窓に表示
 
-- 未署名のためGatekeeperが警告したら、`run.command` を**右クリック→「開く」**（初回のみ）
-- 実行権限が要る場合はターミナルで `chmod +x run.command`
+**方法2: `run.command`（CLI・ダブルクリック）**
+- Finder で `run.command` をダブルクリック。初回だけ venv と依存を自動セットアップ→実行
+- 設定は `config.json` を編集（下記）
+
+**方法3: ターミナル**
+- `python kindle_notion.py -c cookies.txt`（`--limit 1` でテスト）
+
+- 未署名のためGatekeeperが警告したら、**右クリック→「開く」**（初回のみ）
+- 実行権限が要る場合は `chmod +x run.command`
+
+### 単体 .app にする（Python不要のスタンドアロン）
+
+Mac 上で **`build_mac.command` をダブルクリック**（PyInstaller はクロスコンパイル不可なので必ずMacで）。
+`dist/KindleNotion.app` が生成されます。初回起動は右クリック→「開く」。
+
+> パッケージ版（.app）の設定は `~/Library/Application Support/KindleNotion/config.json` に保存されます（バンドル内は書込不可のため）。GUIの入力欄から設定すればこのファイルは意識不要です。
+>
+> Homebrew の Python を使う場合、GUI に必要な Tk が別途要ることがあります: `brew install python-tk`
 
 ## コマンド（ターミナルから使う場合）
 

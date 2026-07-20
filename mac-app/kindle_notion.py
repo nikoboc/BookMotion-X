@@ -208,29 +208,48 @@ def parse_annotations(html: str) -> dict:
 
 
 # ---------------------------------------------------------------- kindle fetch
+def _next_library_token(html: str) -> str:
+    nxt = BeautifulSoup(html, "html.parser").select_one(
+        ".kp-notebook-library-next-page-start"
+    )
+    return (nxt.get("value") or "") if nxt else ""
+
+
 def fetch_all_books(session: requests.Session) -> list:
-    """Paginate /notebook?library=list to collect every book."""
-    books, token, first = [], "", True
-    while True:
-        # Token comes URL-encoded already; append verbatim so requests doesn't
-        # double-encode it (requests preserves existing %-encoding).
-        url = NOTEBOOK + "?library=list" + (f"&token={token}" if token else "")
-        r = session.get(url, timeout=30)
-        if first and ("signin" in r.url or "/ap/" in r.url):
-            raise SystemExit(
-                "ログインしていません。ブラウザで read.amazon.co.jp にログインして再実行"
-                "（または --cookies-file を指定）してください。"
-            )
-        page_books = parse_books(r.text)
-        if first and not page_books:
-            raise SystemExit("本を取得できませんでした。ログイン状態を確認してください。")
-        books.extend(page_books)
-        soup = BeautifulSoup(r.text, "html.parser")
-        nxt = soup.select_one(".kp-notebook-library-next-page-start")
-        token = (nxt.get("value") or "") if nxt else ""
-        first = False
-        if not token:
-            break
+    """Collect every book.
+
+    The first batch (and the CSRF token) come from the main /notebook page;
+    the notebook only serves /notebook?library=list for *subsequent* pages, and
+    only with a token (a tokenless call 400s). So we seed from the main page and
+    then follow the next-page token.
+    """
+    r = session.get(NOTEBOOK, timeout=30)
+    if "signin" in r.url or "/ap/" in r.url:
+        raise SystemExit(
+            "ログインしていません。ブラウザで read.amazon.co.jp にログインして再実行"
+            "（または --cookies-file を指定）してください。"
+        )
+    soup = BeautifulSoup(r.text, "html.parser")
+    csrf_el = soup.select_one("input[name='anti-csrftoken-a2z']")
+    csrf = csrf_el.get("value") if csrf_el else None
+
+    books = parse_books(r.text)
+    if not books:
+        raise SystemExit("本を取得できませんでした。ログイン状態を確認してください。")
+    token = _next_library_token(r.text)
+
+    # Paginated endpoint for the remaining batches. It expects the CSRF token
+    # header and a valid page token; the token is appended verbatim so requests
+    # doesn't double-encode its existing %-encoding.
+    headers = {"X-Requested-With": "XMLHttpRequest", "Referer": NOTEBOOK}
+    if csrf:
+        headers["anti-csrftoken-a2z"] = csrf
+    while token:
+        r = session.get(
+            NOTEBOOK + "?library=list&token=" + token, headers=headers, timeout=30
+        )
+        books.extend(parse_books(r.text))
+        token = _next_library_token(r.text)
     return books
 
 

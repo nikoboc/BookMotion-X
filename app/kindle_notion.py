@@ -272,8 +272,10 @@ def fetch_book_annotations(session: requests.Session, asin: str) -> list:
     return annotations
 
 
-def fetch_kindle(session: requests.Session, limit, log=print) -> list:
+def fetch_kindle(session: requests.Session, limit, log=print, progress=None) -> list:
     log("本一覧を取得中…")
+    if progress:
+        progress("本一覧を取得中", 0, 0)  # count unknown yet → indeterminate
     books = fetch_all_books(session)
     log(f"{len(books)} 冊を検出")
     if limit:
@@ -281,6 +283,8 @@ def fetch_kindle(session: requests.Session, limit, log=print) -> list:
     for i, b in enumerate(books, 1):
         b["annotations"] = fetch_book_annotations(session, b["asin"])
         log(f"({i}/{len(books)}) {b.get('title') or b['asin']} … {len(b['annotations'])} 件")
+        if progress:
+            progress("ハイライト取得", i, len(books))
     return books
 
 
@@ -425,7 +429,7 @@ def build_rows(books: list, today: str) -> list:
     return rows
 
 
-def notion_sync(token, parent_page_id, database_id, books, today, log=print) -> dict:
+def notion_sync(token, parent_page_id, database_id, books, today, log=print, progress=None) -> dict:
     """Push highlights to Notion. Returns a result dict incl. the database_id
     used/created, so the caller can persist it."""
     db_id = normalize_id(database_id or "")
@@ -445,6 +449,8 @@ def notion_sync(token, parent_page_id, database_id, books, today, log=print) -> 
     rows = build_rows(books, today)
     fresh = [r for r in rows if r["key"] not in existing]
     log(f"登録対象 {len(fresh)} 件（重複スキップ {len(rows) - len(fresh)} 件）")
+    if progress:
+        progress("Notion 登録", 0, len(fresh))
 
     ok = fail = 0
     min_interval = 0.34  # ~3 req/s
@@ -461,6 +467,8 @@ def notion_sync(token, parent_page_id, database_id, books, today, log=print) -> 
         except Exception as e:
             fail += 1
             log("  登録失敗: " + str(e))
+        if progress:
+            progress("Notion 登録", i + 1, len(fresh))
         if (i + 1) % 20 == 0 or i == len(fresh) - 1:
             log(f"  Notion 登録 {i + 1}/{len(fresh)}（成功{ok}/失敗{fail}）")
         dt = time.time() - t0
@@ -476,13 +484,13 @@ def notion_sync(token, parent_page_id, database_id, books, today, log=print) -> 
     }
 
 
-def run_sync(cfg: dict, cookies_file=None, browser=None, limit=None, log=print) -> dict:
+def run_sync(cfg: dict, cookies_file=None, browser=None, limit=None, log=print, progress=None) -> dict:
     """End-to-end sync used by both the CLI and the GUI. Persists a newly
     created database_id back into cfg + config.json."""
     if not cfg.get("notion_token"):
         raise RuntimeError("Notion トークンが未設定です。")
     session = build_session(cookies_file, browser, log)
-    books = fetch_kindle(session, limit, log)
+    books = fetch_kindle(session, limit, log, progress)
     if not books:
         raise RuntimeError("本が0冊でした。ログイン状態を確認してください。")
     res = notion_sync(
@@ -492,6 +500,7 @@ def run_sync(cfg: dict, cookies_file=None, browser=None, limit=None, log=print) 
         books,
         date.today().isoformat(),
         log,
+        progress,
     )
     if not (cfg.get("notion_database_id") or "").strip():
         cfg["notion_database_id"] = res["database_id"]

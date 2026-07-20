@@ -79,10 +79,13 @@ async function scrollAndCollectBooks() {
     if (!asin) return;
     const title = div.querySelector("h2.kp-notebook-searchable");
     const author = div.querySelector("p.kp-notebook-searchable");
+    const authorText = author
+      ? author.textContent.trim().replace(/^著者\s*[:：]\s*/, "").trim()
+      : null;
     books.push({
       asin,
       title: title ? title.textContent.trim() : null,
-      author: author ? author.textContent.trim() : null,
+      author: authorText,
     });
   });
   return { notLoggedIn: false, books, domCount: count() };
@@ -155,7 +158,7 @@ async function fetchBookAnnotations(asin) {
     contentLimitState = parsed.contentLimitState || "";
     token = parsed.nextToken || "";
     if (!token) break;
-    await sleep(300);
+    await sleep(150);
   }
   return annotations;
 }
@@ -172,13 +175,36 @@ async function fetchAll(limit) {
   if (books.length === 0) return { error: "no_books" };
   if (limit) books = books.slice(0, limit);
 
-  const out = [];
-  for (let i = 0; i < books.length; i++) {
-    const b = books[i];
-    progress(`(${i + 1}/${books.length}) ${b.title || b.asin}`);
-    const annotations = await fetchBookAnnotations(b.asin);
-    out.push({ ...b, annotation_count: annotations.length, annotations });
+  // Fetch each book's highlights with bounded concurrency (much faster than
+  // one-at-a-time). Results are kept index-aligned with `books`.
+  const CONCURRENCY = 6;
+  const out = new Array(books.length);
+  let next = 0;
+  let done = 0;
+  async function worker() {
+    while (next < books.length) {
+      const i = next++;
+      const b = books[i];
+      try {
+        const annotations = await fetchBookAnnotations(b.asin);
+        out[i] = { ...b, annotation_count: annotations.length, annotations };
+      } catch (e) {
+        out[i] = {
+          ...b,
+          annotation_count: 0,
+          annotations: [],
+          error: String((e && e.message) || e),
+        };
+      }
+      done++;
+      if (done % 5 === 0 || done === books.length) {
+        progress(`ハイライト取得 ${done}/${books.length} 冊`);
+      }
+    }
   }
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, books.length) }, worker)
+  );
 
   return {
     source: NOTEBOOK,
@@ -267,9 +293,47 @@ async function createNotionDatabase(token, parentPageId) {
         },
       },
       実行日: { date: {} },
+      // Dedup key (Amazon annotation id, or a composite fallback). Kept last.
+      注釈ID: { rich_text: {} },
     },
   };
   return await notionFetch(token, "/databases", "POST", body);
+}
+
+// Make sure an existing database has the 注釈ID column (older DBs won't).
+async function ensureNotionSchema(token, dbId) {
+  const db = await notionFetch(token, "/databases/" + dbId, "GET");
+  if (db.properties && db.properties["注釈ID"]) return;
+  await notionFetch(token, "/databases/" + dbId, "PATCH", {
+    properties: { 注釈ID: { rich_text: {} } },
+  });
+}
+
+// Notion is the source of truth for dedup: read every existing 注釈ID value.
+async function queryExistingKeys(token, dbId) {
+  const existing = new Set();
+  let cursor;
+  do {
+    const body = { page_size: 100 };
+    if (cursor) body.start_cursor = cursor;
+    const res = await notionFetch(
+      token,
+      "/databases/" + dbId + "/query",
+      "POST",
+      body
+    );
+    for (const page of res.results || []) {
+      const prop = page.properties && page.properties["注釈ID"];
+      const txt =
+        prop && prop.rich_text
+          ? prop.rich_text.map((t) => t.plain_text).join("")
+          : "";
+      if (txt) existing.add(txt);
+    }
+    cursor = res.has_more ? res.next_cursor : undefined;
+    if (cursor) await sleep(200);
+  } while (cursor);
+  return existing;
 }
 
 // Notion caps a single rich-text object at 2000 chars; split long highlights.
@@ -289,6 +353,7 @@ function pageProperties(r) {
     本のタイトル: { rich_text: richText(r.title) },
     本の著者: { rich_text: richText(r.author) },
     実行日: { date: { start: r.date } },
+    注釈ID: { rich_text: richText(r.key) },
   };
   if (r.location != null && !Number.isNaN(r.location)) {
     props["ハイライト位置"] = { number: r.location };
@@ -297,30 +362,29 @@ function pageProperties(r) {
   return props;
 }
 
-function buildRows(data, today) {
+// Rows for a single book, location-ascending. Each row carries its dedup key.
+function bookRows(book, annotations, today) {
   const rows = [];
-  for (const b of data.books) {
-    for (const a of b.annotations) {
-      if (!a.highlight) continue; // schema has no note column; skip note-only
-      const digits =
-        a.location != null && a.location !== ""
-          ? Number(String(a.location).replace(/[^0-9]/g, ""))
-          : null;
-      rows.push({
-        id: a.id,
-        quote: a.highlight,
-        title: b.title || "",
-        author: b.author || "",
-        location: digits != null && !Number.isNaN(digits) ? digits : null,
-        color: a.color || null,
-        date: today,
-      });
-    }
+  for (const a of annotations || []) {
+    if (!a.highlight) continue; // schema has no note column; skip note-only
+    const digits =
+      a.location != null && a.location !== ""
+        ? Number(String(a.location).replace(/[^0-9]/g, ""))
+        : null;
+    const location = digits != null && !Number.isNaN(digits) ? digits : null;
+    const r = {
+      id: a.id,
+      quote: a.highlight,
+      title: book.title || "",
+      author: book.author || "",
+      location,
+      color: a.color || null,
+      date: today,
+    };
+    r.key = r.id || `${r.title}|${r.location}|${(r.quote || "").slice(0, 40)}`;
+    rows.push(r);
   }
-  // 本のタイトル昇順 → ハイライト位置昇順（挿入順＝表示順）
   rows.sort((x, y) => {
-    const t = (x.title || "").localeCompare(y.title || "", "ja");
-    if (t) return t;
     const lx = x.location == null ? Infinity : x.location;
     const ly = y.location == null ? Infinity : y.location;
     return lx - ly;
@@ -328,69 +392,123 @@ function buildRows(data, today) {
   return rows;
 }
 
+// Bounded-concurrency gate so we can prefetch a few books ahead while the
+// (rate-limited) Notion inserts drain, without launching all fetches at once.
+class Semaphore {
+  constructor(max) {
+    this.max = max;
+    this.cur = 0;
+    this.q = [];
+  }
+  run(fn) {
+    return new Promise((resolve, reject) => {
+      const task = () => {
+        this.cur++;
+        Promise.resolve()
+          .then(fn)
+          .then(
+            (v) => {
+              this.cur--;
+              this._next();
+              resolve(v);
+            },
+            (e) => {
+              this.cur--;
+              this._next();
+              reject(e);
+            }
+          );
+      };
+      if (this.cur < this.max) task();
+      else this.q.push(task);
+    });
+  }
+  _next() {
+    if (this.q.length && this.cur < this.max) this.q.shift()();
+  }
+}
+
 async function sync(limit) {
   const cfg = await getConfig();
   if (!cfg.notionToken) return { error: "no_token" };
+  const token = cfg.notionToken;
 
   let dbId = cfg.notionDatabaseId ? normalizeId(cfg.notionDatabaseId) : "";
   if (!dbId) {
     const parent = normalizeId(cfg.notionParentPageId);
     if (!parent) return { error: "no_db_or_parent" };
     progress("Notion データベースを作成中…");
-    const db = await createNotionDatabase(cfg.notionToken, parent);
+    const db = await createNotionDatabase(token, parent);
     dbId = db.id;
     await chrome.storage.local.set({ notionDatabaseId: dbId });
     toUI({ type: "db_created", id: dbId, url: db.url });
   }
 
-  const data = await fetchAll(limit);
-  if (data.error) return data;
+  // Notion is the source of truth for dedup.
+  progress("Notion のスキーマと既存データを確認中…");
+  await ensureNotionSchema(token, dbId);
+  const existing = await queryExistingKeys(token, dbId);
+  progress(`既存 ${existing.size} 件を確認`);
 
-  const rows = buildRows(data, localDate());
+  // Discover the full library (tab + auto-scroll), then process books in
+  // 本のタイトル昇順 so creation order == 本タイトル昇順→位置昇順.
+  progress("notebook をタブで開いて全書籍を読み込み中…");
+  const lib = await discoverBooks();
+  if (lib.notLoggedIn) return { error: "not_logged_in" };
+  let books = lib.books || [];
+  if (books.length === 0) return { error: "no_books" };
+  if (limit) books = books.slice(0, limit);
+  books.sort((a, b) => (a.title || "").localeCompare(b.title || "", "ja"));
+  progress(`${books.length} 冊。取得と登録を並行実行します…`);
 
-  // Dedup against previously inserted annotations for this database.
-  const insertedKey = "inserted_" + dbId;
-  const store = await chrome.storage.local.get(insertedKey);
-  const inserted = new Set(store[insertedKey] || []);
-  const keyOf = (r) =>
-    r.id || `${r.title}|${r.location}|${(r.quote || "").slice(0, 40)}`;
-  const fresh = rows.filter((r) => !inserted.has(keyOf(r)));
+  const today = localDate();
 
-  progress(
-    `登録対象 ${fresh.length} 件（重複スキップ ${rows.length - fresh.length} 件）`
+  // Pipeline (B): prefetch up to 6 books ahead while inserts drain. Each
+  // book's highlights are consumed strictly in title order.
+  const sem = new Semaphore(6);
+  const fetches = books.map((b) =>
+    sem
+      .run(() => fetchBookAnnotations(b.asin))
+      .then((annotations) => ({ annotations }))
+      .catch((e) => ({ annotations: [], error: String((e && e.message) || e) }))
   );
 
   let ok = 0;
   let fail = 0;
-  for (let i = 0; i < fresh.length; i++) {
-    const r = fresh[i];
-    try {
-      await notionFetch(cfg.notionToken, "/pages", "POST", {
-        parent: { database_id: dbId },
-        properties: pageProperties(r),
-      });
-      ok++;
-      inserted.add(keyOf(r));
-    } catch (e) {
-      fail++;
-      console.error("Notion insert failed:", e);
-    }
-    if ((i + 1) % 10 === 0 || i === fresh.length - 1) {
-      progress(`Notion 登録中… ${i + 1}/${fresh.length}（成功${ok}/失敗${fail}）`);
-      await chrome.storage.local.set({ [insertedKey]: [...inserted] });
-    }
-    await sleep(334); // ~3 req/s (Notion's average rate limit)
-  }
-  await chrome.storage.local.set({ [insertedKey]: [...inserted] });
+  let total = 0;
+  let skipped = 0;
+  const MIN_INTERVAL = 340; // ms; Notion's average limit is ~3 req/s
 
-  return {
-    notion: true,
-    dbId,
-    total: rows.length,
-    inserted: ok,
-    failed: fail,
-    skipped: rows.length - fresh.length,
-  };
+  for (let i = 0; i < books.length; i++) {
+    const b = books[i];
+    const res = await fetches[i]; // ready by now (fetch outran the inserts)
+    const rows = bookRows(b, res.annotations, today);
+    total += rows.length;
+    const fresh = rows.filter((r) => !existing.has(r.key));
+    skipped += rows.length - fresh.length;
+
+    for (const r of fresh) {
+      const started = Date.now();
+      try {
+        await notionFetch(token, "/pages", "POST", {
+          parent: { database_id: dbId },
+          properties: pageProperties(r),
+        });
+        ok++;
+        existing.add(r.key);
+      } catch (e) {
+        fail++;
+        console.error("Notion insert failed:", e);
+      }
+      await sleep(Math.max(0, MIN_INTERVAL - (Date.now() - started)));
+    }
+
+    progress(
+      `(${i + 1}/${books.length}) ${b.title || b.asin} ｜ 登録${ok} 重複${skipped} 失敗${fail}`
+    );
+  }
+
+  return { notion: true, dbId, total, inserted: ok, failed: fail, skipped };
 }
 
 async function createDbOnly() {

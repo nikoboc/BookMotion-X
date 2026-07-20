@@ -20,7 +20,9 @@ function parseLibrary(html) {
     books.push({
       asin,
       title: title ? title.textContent.trim() : null,
-      author: author ? author.textContent.trim() : null,
+      author: author
+        ? author.textContent.trim().replace(/^著者\s*[:：]\s*/, "").trim()
+        : null,
     });
   });
   return { notLoggedIn: false, books };

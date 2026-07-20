@@ -48,7 +48,13 @@ Kindle のハイライト（`read.amazon.co.jp/notebook`）を取得して Notio
 - 設定は `config.json` を編集（下記）
 
 **方法3: ターミナル**
-- `python kindle_notion.py -c cookies.txt`（`--limit 1` でテスト）
+- 初回のみ venv と依存をセットアップ:
+  ```bash
+  python3 -m venv .venv
+  ./.venv/bin/pip install --upgrade pip
+  ./.venv/bin/pip install -r requirements.txt
+  ```
+- 実行: `./.venv/bin/python kindle_notion.py -c cookies.txt`（`--limit 1` でテスト）
 
 - 未署名のためGatekeeperが警告したら、**右クリック→「開く」**（初回のみ）
 - 実行権限が要る場合は `chmod +x run.command`

@@ -9,3 +9,9 @@ cookies.json
 # Scraper output / debug
 debug_*.html
 test_output.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

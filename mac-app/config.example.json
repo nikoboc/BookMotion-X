@@ -1,0 +1,5 @@
+{
+  "notion_token": "ntn_xxx_your_integration_token",
+  "notion_parent_page_id": "https://www.notion.so/your-parent-page-...  (URL でも 32桁ID でも可)",
+  "notion_database_id": ""
+}

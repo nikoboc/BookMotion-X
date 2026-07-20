@@ -70,7 +70,6 @@ class App:
                 core.import_cookies_file(legacy)
             except Exception:
                 pass
-        self.test_mode = tk.BooleanVar(value=False)
         self.show_token = tk.BooleanVar(value=False)
 
         self._setup_fonts()
@@ -165,7 +164,7 @@ class App:
         c2 = self._card(2, "取得設定")
         self._label(c2, "Cookie（cookies.txt）", 1)
         ff = ctk.CTkFrame(c2, fg_color="transparent")
-        ff.grid(row=1, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=6)
+        ff.grid(row=1, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=(6, 16))
         ff.columnconfigure(0, weight=1)
         self.cookies_status_lbl = ctk.CTkLabel(
             ff, textvariable=self.cookies_status, font=self.f_small,
@@ -175,10 +174,6 @@ class App:
         self.cookies_btn.grid(row=0, column=1, padx=(8, 0))
         self.cookies_clear_btn = self._ghost(ff, "クリア", self._clear_cookies, width=72)
         self.cookies_clear_btn.grid(row=0, column=2, padx=(8, 0))
-
-        ctk.CTkCheckBox(c2, text="テスト（先頭 1 冊だけ）", variable=self.test_mode,
-                        font=self.f_body).grid(
-            row=2, column=1, columnspan=2, sticky="w", padx=(0, 16), pady=(6, 16))
 
         # --- action row ---
         ar = ctk.CTkFrame(self.outer, fg_color="transparent")
@@ -324,9 +319,8 @@ class App:
                 raise RuntimeError(
                     "cookies.txt が取り込まれていません。「取り込み…」から取り込んでください。")
             cookies_file = str(core.get_cookies_path())
-            limit = 1 if self.test_mode.get() else None
             res = core.run_sync(
-                cfg, cookies_file, limit, log=self.log, progress=self.on_progress
+                cfg, cookies_file, None, log=self.log, progress=self.on_progress
             )
             self.root.after(0, lambda: self.dbid.set(cfg.get("notion_database_id", "")))
             self.log(

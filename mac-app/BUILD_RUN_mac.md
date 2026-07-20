@@ -1,7 +1,7 @@
 # macOS ビルド・実行手順
 
-Kindle ハイライト → Notion 同期アプリ（`mac-app/`）を Mac 上でビルドして使う手順。
-コマンドはすべて `mac-app/` フォルダの中で実行します。
+Kindle ハイライト → Notion 同期アプリを Mac 上でビルドして使う手順。
+共通コアは [`../app/`](../app/) にあり、この `mac-app/` の `build_mac.command` / `run.command` がそれを参照します（venv と `dist/` は `mac-app/` 内に作られます）。ビルド・起動コマンドは `mac-app/` フォルダの中で実行します。
 
 ```bash
 cd mac-app
@@ -63,17 +63,17 @@ Finder で **`build_mac.command` をダブルクリック**（または以下）
 
 ## デバッグ用（コア機能をターミナルで実行）
 
-`.app` を介さず、同期ロジック [kindle_notion.py](kindle_notion.py) を直接動かす方法。引数でテスト・Cookie 元を細かく指定できます。
+`.app` を介さず、同期ロジック [../app/kindle_notion.py](../app/kindle_notion.py) を直接動かす方法。引数でテスト・Cookie 元を細かく指定できます。コアは `../app/` にあり、venv はこの `mac-app/` に作られます。
 
-**初回セットアップ**（仮想環境 + 依存）:
+**初回セットアップ**（仮想環境 + 依存。`mac-app/` 内で実行）:
 
 ```bash
 python3 -m venv .venv
 ./.venv/bin/pip install --upgrade pip
-./.venv/bin/pip install -r requirements.txt
+./.venv/bin/pip install -r ../app/requirements.txt
 ```
 
-**設定** … CLI は画面が無いので `config.json` を読みます（`config.example.json` が見本）:
+**設定** … CLI は画面が無いので `config.json` を読みます（`../app/config.example.json` が見本。置き場所は `../app/config.json`）:
 
 ```json
 {
@@ -83,14 +83,14 @@ python3 -m venv .venv
 }
 ```
 
-探索順は `mac-app/config.json` → 無ければ `~/.kindle-notion/config.json`。`.gitignore` 済み。
+探索順は `app/config.json` → 無ければ `~/.kindle-notion/config.json`。`.gitignore` 済み。
 
 **実行**:
 
 ```bash
-./.venv/bin/python kindle_notion.py -c cookies.txt --limit 1   # 先頭1冊でテスト
-./.venv/bin/python kindle_notion.py -b safari                  # Safari の Cookie を使う
-./.venv/bin/python kindle_notion.py -c cookies.txt             # 通常実行
+./.venv/bin/python ../app/kindle_notion.py -c cookies.txt --limit 1   # 先頭1冊でテスト
+./.venv/bin/python ../app/kindle_notion.py -b safari                  # Safari の Cookie を使う
+./.venv/bin/python ../app/kindle_notion.py -c cookies.txt             # 通常実行
 ```
 
 | 引数 | 意味 |

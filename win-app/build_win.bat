@@ -15,6 +15,7 @@ py -3 -m venv .buildvenv || (echo Python 3 が見つかりません。python.org
 echo == exe をビルド中 (数分かかります) ==
 ".buildvenv\Scripts\pyinstaller.exe" --noconfirm --windowed --onefile --name "KindleNotion" ^
   --paths "%APP%" ^
+  --add-data "%APP%\fonts;fonts" ^
   --collect-all certifi ^
   --collect-all customtkinter ^
   --collect-all darkdetect ^

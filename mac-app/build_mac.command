@@ -13,6 +13,7 @@ echo "== .appをビルド中 (数分かかります) =="
 ./.buildvenv/bin/pyinstaller --noconfirm --windowed --name "KindleNotion" \
   --osx-bundle-identifier "com.local.kindlenotion" \
   --paths "$APP" \
+  --add-data "$APP/fonts:fonts" \
   --collect-all certifi \
   --collect-all customtkinter \
   --collect-all darkdetect \

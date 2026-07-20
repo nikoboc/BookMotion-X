@@ -8,6 +8,7 @@ import sys
 import threading
 import tkinter as tk
 import tkinter.font as tkfont
+from pathlib import Path
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
@@ -22,14 +23,97 @@ MUTED = ("gray40", "gray65")  # (light, dark)
 APPEARANCE = {"システム": "system", "ライト": "light", "ダーク": "dark"}
 
 
+def _fonts_dir() -> Path:
+    """Directory holding the bundled .otf/.ttf files, in dev and when frozen.
+
+    When packaged with PyInstaller (`--add-data "...:fonts"`), the files land
+    under sys._MEIPASS/fonts; in dev they sit next to this script in app/fonts/.
+    """
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+        return base / "fonts"
+    return Path(__file__).resolve().parent / "fonts"
+
+
+def _register_font_file(path: str) -> bool:
+    """Load one font file into THIS process only (no system-wide install).
+
+    Windows uses AddFontResourceEx with FR_PRIVATE; macOS uses CoreText's
+    CTFontManagerRegisterFontsForURL at process scope. Best-effort: any failure
+    returns False and the caller falls back to a system font.
+    """
+    try:
+        if sys.platform.startswith("win"):
+            import ctypes
+
+            FR_PRIVATE = 0x10
+            added = ctypes.windll.gdi32.AddFontResourceExW(
+                ctypes.c_wchar_p(path), FR_PRIVATE, 0)
+            return added > 0
+        if sys.platform == "darwin":
+            import ctypes
+            import ctypes.util
+
+            ct = ctypes.CDLL(ctypes.util.find_library("CoreText"))
+            cf = ctypes.CDLL(ctypes.util.find_library("CoreFoundation"))
+            cf.CFStringCreateWithCString.restype = ctypes.c_void_p
+            cf.CFStringCreateWithCString.argtypes = [
+                ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint32]
+            cf.CFURLCreateWithFileSystemPath.restype = ctypes.c_void_p
+            cf.CFURLCreateWithFileSystemPath.argtypes = [
+                ctypes.c_void_p, ctypes.c_void_p, ctypes.c_long, ctypes.c_bool]
+            cf.CFRelease.argtypes = [ctypes.c_void_p]
+            ct.CTFontManagerRegisterFontsForURL.restype = ctypes.c_bool
+            ct.CTFontManagerRegisterFontsForURL.argtypes = [
+                ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p]
+            kCFStringEncodingUTF8 = 0x08000100
+            kCFURLPOSIXPathStyle = 0
+            kCTFontManagerScopeProcess = 1
+            s = cf.CFStringCreateWithCString(
+                None, path.encode("utf-8"), kCFStringEncodingUTF8)
+            url = cf.CFURLCreateWithFileSystemPath(
+                None, s, kCFURLPOSIXPathStyle, False)
+            ok = ct.CTFontManagerRegisterFontsForURL(
+                url, kCTFontManagerScopeProcess, None)
+            cf.CFRelease(url)
+            cf.CFRelease(s)
+            return bool(ok)
+    except Exception:
+        return False
+    return False  # Linux: rely on a system-installed Noto Sans CJK JP instead.
+
+
+def register_bundled_fonts() -> None:
+    """Register the bundled Noto Sans JP so Windows and macOS render identically.
+
+    Must run BEFORE the Tk root is created so the new families are visible to
+    Tk's font enumerator. Best-effort: if the files are missing or the OS call
+    fails, _resolve_fonts falls back to the best per-OS system font.
+    """
+    d = _fonts_dir()
+    if not d.is_dir():
+        return
+    for f in sorted(d.iterdir()):
+        if f.suffix.lower() in (".otf", ".ttf"):
+            _register_font_file(str(f))
+
+
 def _resolve_fonts(root):
-    """Pick UI font families. Windows → Noto Sans JP; macOS → the system font.
+    """Pick UI font families, preferring the bundled Noto Sans JP.
+
+    The bundled font is registered at startup (register_bundled_fonts), so on
+    both Windows and macOS "Noto Sans JP" is present and the app renders alike.
+    If it isn't available — running from source without the font files, or the
+    OS registration failed — fall back to the best per-OS system font.
 
     Returns (regular_family, medium_family). medium_family == regular_family
-    when no distinct medium-weight face exists (macOS/Linux), in which case the
-    caller falls back to a bold weight for emphasis.
+    when no distinct medium-weight face exists, in which case the caller falls
+    back to a bold weight for emphasis.
     """
     fams = set(tkfont.families(root))
+    if "Noto Sans JP" in fams:
+        med = "Noto Sans JP Medium" if "Noto Sans JP Medium" in fams else "Noto Sans JP"
+        return "Noto Sans JP", med
     if sys.platform == "darwin":
         # Match the OS: reuse whatever family Tk's default (system) font resolves to.
         try:
@@ -38,12 +122,10 @@ def _resolve_fonts(root):
             base = "Helvetica Neue"
         return base, base
     if sys.platform.startswith("win"):
-        reg = next((f for f in ("Noto Sans JP", "Yu Gothic UI", "Meiryo UI", "Segoe UI")
+        reg = next((f for f in ("Yu Gothic UI", "Meiryo UI", "Segoe UI")
                     if f in fams), "Segoe UI")
-        med = ("Noto Sans JP Medium"
-               if reg == "Noto Sans JP" and "Noto Sans JP Medium" in fams else reg)
-        return reg, med
-    reg = next((f for f in ("Noto Sans CJK JP", "Noto Sans JP", "Noto Sans")
+        return reg, reg
+    reg = next((f for f in ("Noto Sans CJK JP", "Noto Sans")
                 if f in fams), "TkDefaultFont")
     return reg, reg
 
@@ -336,6 +418,7 @@ class App:
 
 
 def main():
+    register_bundled_fonts()  # before ctk.CTk() so Tk sees the new families
     ctk.set_default_color_theme("blue")
     ctk.set_appearance_mode("system")
     root = ctk.CTk()

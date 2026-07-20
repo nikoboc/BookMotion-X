@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tkinter GUI for the Kindle → Notion app (Level 3 packaged .app entry point).
+"""CustomTkinter GUI for the Kindle → Notion app (Level 3 packaged .app entry point).
 
 Enter your Notion token / parent page / cookies right in the window — no file
 editing. Values are saved to config.json (Application Support when packaged).
@@ -8,22 +8,20 @@ import sys
 import threading
 import tkinter as tk
 import tkinter.font as tkfont
-from tkinter import ttk, filedialog, messagebox, scrolledtext
+from tkinter import filedialog, messagebox
+
+import customtkinter as ctk
 
 import kindle_notion as core
 
 BROWSERS = ["chrome", "safari", "edge", "brave", "firefox"]
 
-# --- modern palette ---------------------------------------------------------
-BG = "#EEF1F5"        # window background
-CARD = "#FFFFFF"      # card surface
-TEXT = "#1F2933"      # primary text
-MUTED = "#6B7280"     # secondary text
-BORDER = "#E2E8F0"    # hairline borders
-FIELD = "#F1F5F9"     # input fill
-ACCENT = "#4F46E5"    # primary action (indigo)
+# indigo accent, works on both light and dark backgrounds
+ACCENT = "#4F46E5"
 ACCENT_HOVER = "#4338CA"
-ACCENT_ACTIVE = "#3730A3"
+MUTED = ("gray40", "gray65")  # (light, dark)
+
+APPEARANCE = {"システム": "system", "ライト": "light", "ダーク": "dark"}
 
 
 def _resolve_fonts(root):
@@ -53,12 +51,11 @@ def _resolve_fonts(root):
 
 
 class App:
-    def __init__(self, root: tk.Tk):
+    def __init__(self, root: ctk.CTk):
         self.root = root
         root.title("Kindle → Notion")
-        root.geometry("680x680")
-        root.minsize(600, 560)
-        root.configure(bg=BG)
+        root.geometry("720x820")
+        root.minsize(640, 700)
         cfg = core.load_config()
         self._indeterminate = False
 
@@ -71,208 +68,156 @@ class App:
         self.test_mode = tk.BooleanVar(value=False)
         self.show_token = tk.BooleanVar(value=False)
 
-        self._setup_style()
+        self._setup_fonts()
         self._build()
 
-    # -- theming --------------------------------------------------------------
-    def _setup_style(self):
+    # -- fonts ---------------------------------------------------------------
+    def _setup_fonts(self):
         reg, med = _resolve_fonts(self.root)
-        self.fam = reg
-        self.f_base = (reg, 10)
-        self.f_small = (reg, 9)
-        self.f_sub = (reg, 10)
-        self.f_head = (reg, 17, "bold")
+        self.f_title = ctk.CTkFont(family=reg, size=22, weight="bold")
+        self.f_sub = ctk.CTkFont(family=reg, size=13)
+        self.f_body = ctk.CTkFont(family=reg, size=13)
+        self.f_small = ctk.CTkFont(family=reg, size=12)
+        self.f_log = ctk.CTkFont(family=reg, size=12)
         # Prefer a true Medium face for headings/buttons; else fall back to bold.
-        self.f_section = (med, 11) if med != reg else (reg, 11, "bold")
-        self.f_btn = (med, 10) if med != reg else (reg, 10, "bold")
+        self.f_section = (ctk.CTkFont(family=med, size=14) if med != reg
+                          else ctk.CTkFont(family=reg, size=14, weight="bold"))
+        self.f_btn = (ctk.CTkFont(family=med, size=13) if med != reg
+                      else ctk.CTkFont(family=reg, size=13, weight="bold"))
 
-        st = ttk.Style()
-        st.theme_use("clam")
+    # -- reusable widgets ----------------------------------------------------
+    def _card(self, row, title, expand=False):
+        card = ctk.CTkFrame(self.outer, corner_radius=12)
+        card.grid(row=row, column=0, sticky="nsew" if expand else "ew", pady=(0, 12))
+        card.columnconfigure(0, weight=1)
+        card.columnconfigure(1, weight=1)
+        ctk.CTkLabel(card, text=title, font=self.f_section, anchor="w").grid(
+            row=0, column=0, columnspan=3, sticky="w", padx=16, pady=(14, 4))
+        return card
 
-        # labels
-        st.configure("Card.TLabel", background=CARD, foreground=TEXT, font=self.f_base)
-        st.configure("Muted.TLabel", background=CARD, foreground=MUTED, font=self.f_small)
-        st.configure("Section.TLabel", background=CARD, foreground=TEXT, font=self.f_section)
-
-        # entries
-        st.configure(
-            "Modern.TEntry",
-            fieldbackground=FIELD, background=FIELD, foreground=TEXT,
-            bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER,
-            insertcolor=TEXT, borderwidth=1, padding=7,
-        )
-        st.map("Modern.TEntry",
-               bordercolor=[("focus", ACCENT)],
-               lightcolor=[("focus", ACCENT)],
-               darkcolor=[("focus", ACCENT)])
-
-        # combobox
-        st.configure(
-            "Modern.TCombobox",
-            fieldbackground=FIELD, background=FIELD, foreground=TEXT,
-            bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER,
-            arrowcolor=MUTED, borderwidth=1, padding=5,
-        )
-        st.map("Modern.TCombobox",
-               fieldbackground=[("readonly", FIELD)],
-               bordercolor=[("focus", ACCENT)])
-
-        # radios / checks on cards
-        st.configure("Card.TRadiobutton", background=CARD, foreground=TEXT, font=self.f_base)
-        st.map("Card.TRadiobutton", background=[("active", CARD)], foreground=[("active", TEXT)])
-        st.configure("Card.TCheckbutton", background=CARD, foreground=TEXT, font=self.f_base)
-        st.map("Card.TCheckbutton", background=[("active", CARD)], foreground=[("active", TEXT)])
-
-        # primary (accent) button
-        st.configure(
-            "Accent.TButton",
-            background=ACCENT, foreground="#FFFFFF", font=self.f_btn,
-            borderwidth=0, focusthickness=0, padding=(18, 9),
-        )
-        st.map("Accent.TButton",
-               background=[("pressed", ACCENT_ACTIVE), ("active", ACCENT_HOVER),
-                          ("disabled", "#A5B4FC")],
-               foreground=[("disabled", "#EEF2FF")])
-
-        # secondary button
-        st.configure(
-            "Secondary.TButton",
-            background="#FFFFFF", foreground=TEXT, font=self.f_btn,
-            bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER,
-            borderwidth=1, focusthickness=0, padding=(14, 8),
-        )
-        st.map("Secondary.TButton",
-               background=[("pressed", "#E2E8F0"), ("active", "#F1F5F9")],
-               bordercolor=[("active", "#CBD5E1")])
-
-        # progress bar (thin, accent)
-        st.configure(
-            "Accent.Horizontal.TProgressbar",
-            troughcolor=BORDER, background=ACCENT,
-            bordercolor=BORDER, lightcolor=ACCENT, darkcolor=ACCENT,
-            thickness=6, borderwidth=0,
+    def _ghost(self, parent, text, command, width=0):
+        kw = {"width": width} if width else {}
+        return ctk.CTkButton(
+            parent, text=text, command=command, font=self.f_btn,
+            fg_color="transparent", border_width=1,
+            text_color=("gray20", "gray90"),
+            border_color=("gray70", "gray45"),
+            hover_color=("gray90", "gray25"), **kw,
         )
 
-    # -- card helper ----------------------------------------------------------
-    def _card(self, parent, title):
-        card = tk.Frame(parent, bg=CARD, highlightbackground=BORDER,
-                        highlightthickness=1, bd=0)
-        card.pack(fill="x", pady=(0, 14))
-        ttk.Label(card, text=title, style="Section.TLabel").pack(
-            anchor="w", padx=16, pady=(14, 2))
-        body = tk.Frame(card, bg=CARD)
-        body.pack(fill="both", expand=True, padx=16, pady=(6, 16))
-        body.columnconfigure(1, weight=1)
-        return body
+    def _accent(self, parent, text, command):
+        return ctk.CTkButton(
+            parent, text=text, command=command, font=self.f_btn,
+            fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color="#FFFFFF",
+        )
+
+    def _label(self, parent, text, row):
+        ctk.CTkLabel(parent, text=text, font=self.f_body, anchor="w").grid(
+            row=row, column=0, sticky="w", padx=(16, 8), pady=6)
 
     def _build(self):
-        outer = tk.Frame(self.root, bg=BG)
-        outer.pack(fill="both", expand=True, padx=22, pady=20)
+        self.outer = ctk.CTkFrame(self.root, fg_color="transparent")
+        self.outer.pack(fill="both", expand=True, padx=20, pady=18)
+        self.outer.columnconfigure(0, weight=1)
+        self.outer.rowconfigure(5, weight=1)
 
-        # header
-        head = tk.Frame(outer, bg=BG)
-        head.pack(fill="x", pady=(0, 16))
-        tk.Label(head, text="📚  Kindle → Notion", bg=BG, fg=TEXT,
-                 font=self.f_head).pack(anchor="w")
-        tk.Label(head, text="Kindle のハイライトを Notion データベースに同期します",
-                 bg=BG, fg=MUTED, font=self.f_sub).pack(anchor="w", pady=(2, 0))
-
-        pad = {"padx": 6, "pady": 6}
+        # --- header ---
+        hdr = ctk.CTkFrame(self.outer, fg_color="transparent")
+        hdr.grid(row=0, column=0, sticky="ew", pady=(0, 14))
+        hdr.columnconfigure(0, weight=1)
+        titles = ctk.CTkFrame(hdr, fg_color="transparent")
+        titles.grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(titles, text="📚  Kindle → Notion", font=self.f_title,
+                     anchor="w").pack(anchor="w")
+        ctk.CTkLabel(titles, text="Kindle のハイライトを Notion に同期します",
+                     font=self.f_sub, text_color=MUTED, anchor="w").pack(anchor="w")
+        self.appearance = ctk.CTkOptionMenu(
+            hdr, values=list(APPEARANCE), width=112, font=self.f_small,
+            command=self._set_appearance, fg_color=ACCENT, button_color=ACCENT,
+            button_hover_color=ACCENT_HOVER)
+        self.appearance.set("システム")
+        self.appearance.grid(row=0, column=1, sticky="e")
 
         # --- card: Notion 接続 ---
-        c1 = self._card(outer, "Notion 接続")
-        r = 0
-        ttk.Label(c1, text="Notion トークン", style="Card.TLabel").grid(
-            row=r, column=0, sticky="w", **pad)
-        self.token_entry = ttk.Entry(c1, textvariable=self.token, show="•",
-                                     style="Modern.TEntry")
-        self.token_entry.grid(row=r, column=1, sticky="we", **pad)
-        ttk.Checkbutton(c1, text="表示", variable=self.show_token,
-                        command=self._toggle_token,
-                        style="Card.TCheckbutton").grid(row=r, column=2, **pad)
+        c1 = self._card(1, "Notion 接続")
+        self._label(c1, "Notion トークン", 1)
+        self.token_entry = ctk.CTkEntry(c1, textvariable=self.token, show="•",
+                                        font=self.f_body)
+        self.token_entry.grid(row=1, column=1, sticky="ew", padx=(0, 8), pady=6)
+        ctk.CTkCheckBox(c1, text="表示", variable=self.show_token, width=52,
+                        command=self._toggle_token, font=self.f_small).grid(
+            row=1, column=2, sticky="w", padx=(0, 16), pady=6)
 
-        r += 1
-        ttk.Label(c1, text="親ページ URL", style="Card.TLabel").grid(
-            row=r, column=0, sticky="w", **pad)
-        ttk.Entry(c1, textvariable=self.parent, style="Modern.TEntry").grid(
-            row=r, column=1, columnspan=2, sticky="we", **pad)
+        self._label(c1, "親ページ URL", 2)
+        ctk.CTkEntry(c1, textvariable=self.parent, font=self.f_body).grid(
+            row=2, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=6)
 
-        r += 1
-        ttk.Label(c1, text="DB ID（任意）", style="Card.TLabel").grid(
-            row=r, column=0, sticky="w", **pad)
-        ttk.Entry(c1, textvariable=self.dbid, style="Modern.TEntry").grid(
-            row=r, column=1, columnspan=2, sticky="we", **pad)
+        self._label(c1, "DB ID（任意）", 3)
+        ctk.CTkEntry(c1, textvariable=self.dbid, font=self.f_body).grid(
+            row=3, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=(6, 16))
 
         # --- card: 取得設定 ---
-        c2 = self._card(outer, "取得設定")
-        r = 0
-        ttk.Label(c2, text="Cookie 取得元", style="Card.TLabel").grid(
-            row=r, column=0, sticky="w", **pad)
-        cf = tk.Frame(c2, bg=CARD)
-        cf.grid(row=r, column=1, columnspan=2, sticky="w", **pad)
-        ttk.Radiobutton(cf, text="cookies.txt", variable=self.cookie_mode,
-                        value="file", style="Card.TRadiobutton").pack(side="left")
-        ttk.Radiobutton(cf, text="ブラウザから自動", variable=self.cookie_mode,
-                        value="browser", style="Card.TRadiobutton").pack(
-            side="left", padx=(14, 0))
+        c2 = self._card(2, "取得設定")
+        self._label(c2, "Cookie 取得元", 1)
+        cf = ctk.CTkFrame(c2, fg_color="transparent")
+        cf.grid(row=1, column=1, columnspan=2, sticky="w", padx=(0, 16), pady=6)
+        ctk.CTkRadioButton(cf, text="cookies.txt", variable=self.cookie_mode,
+                           value="file", font=self.f_body).pack(side="left")
+        ctk.CTkRadioButton(cf, text="ブラウザから自動", variable=self.cookie_mode,
+                           value="browser", font=self.f_body).pack(side="left", padx=(18, 0))
 
-        r += 1
-        ttk.Label(c2, text="cookies.txt", style="Card.TLabel").grid(
-            row=r, column=0, sticky="w", **pad)
-        ff = tk.Frame(c2, bg=CARD)
-        ff.grid(row=r, column=1, columnspan=2, sticky="we", **pad)
-        ttk.Entry(ff, textvariable=self.cookies_file, style="Modern.TEntry").pack(
-            side="left", fill="x", expand=True)
-        ttk.Button(ff, text="選択…", command=self._pick_cookies,
-                   style="Secondary.TButton").pack(side="left", padx=(8, 0))
+        self._label(c2, "cookies.txt", 2)
+        ff = ctk.CTkFrame(c2, fg_color="transparent")
+        ff.grid(row=2, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=6)
+        ff.columnconfigure(0, weight=1)
+        ctk.CTkEntry(ff, textvariable=self.cookies_file, font=self.f_body).grid(
+            row=0, column=0, sticky="ew")
+        self._ghost(ff, "選択…", self._pick_cookies, width=88).grid(
+            row=0, column=1, padx=(8, 0))
 
-        r += 1
-        ttk.Label(c2, text="ブラウザ", style="Card.TLabel").grid(
-            row=r, column=0, sticky="w", **pad)
-        ttk.Combobox(c2, textvariable=self.browser, values=BROWSERS,
-                     state="readonly", width=14,
-                     style="Modern.TCombobox").grid(row=r, column=1, sticky="w", **pad)
+        self._label(c2, "ブラウザ", 3)
+        ctk.CTkOptionMenu(c2, variable=self.browser, values=BROWSERS, width=150,
+                          font=self.f_body, fg_color=ACCENT, button_color=ACCENT,
+                          button_hover_color=ACCENT_HOVER).grid(
+            row=3, column=1, sticky="w", padx=(0, 16), pady=6)
 
-        r += 1
-        ttk.Checkbutton(c2, text="テスト（先頭 1 冊だけ）", variable=self.test_mode,
-                        style="Card.TCheckbutton").grid(
-            row=r, column=1, columnspan=2, sticky="w", **pad)
+        ctk.CTkCheckBox(c2, text="テスト（先頭 1 冊だけ）", variable=self.test_mode,
+                        font=self.f_body).grid(
+            row=4, column=1, columnspan=2, sticky="w", padx=(0, 16), pady=(6, 16))
 
         # --- action row ---
-        bf = tk.Frame(outer, bg=BG)
-        bf.pack(fill="x", pady=(0, 14))
-        bf.columnconfigure(1, weight=1)
-        ttk.Button(bf, text="保存", command=self.save,
-                   style="Secondary.TButton").grid(row=0, column=0, sticky="w")
-        self.sync_btn = ttk.Button(bf, text="Notion へ同期", command=self.sync,
-                                   style="Accent.TButton")
+        ar = ctk.CTkFrame(self.outer, fg_color="transparent")
+        ar.grid(row=3, column=0, sticky="ew", pady=(0, 12))
+        ar.columnconfigure(1, weight=1)
+        self._ghost(ar, "保存", self.save, width=104).grid(row=0, column=0, sticky="w")
+        self.sync_btn = self._accent(ar, "Notion へ同期", self.sync)
+        self.sync_btn.configure(width=168, height=40)
         self.sync_btn.grid(row=0, column=2, sticky="e")
 
         # --- progress ---
-        pf = tk.Frame(outer, bg=BG)
-        pf.pack(fill="x", pady=(0, 14))
+        pf = ctk.CTkFrame(self.outer, fg_color="transparent")
+        pf.grid(row=4, column=0, sticky="ew", pady=(0, 12))
         pf.columnconfigure(0, weight=1)
-        self.pbar = ttk.Progressbar(pf, mode="determinate",
-                                    style="Accent.Horizontal.TProgressbar")
-        self.pbar.grid(row=0, column=0, sticky="we")
-        self.status = tk.Label(pf, text="", bg=BG, fg=MUTED, font=self.f_small)
-        self.status.grid(row=1, column=0, sticky="w", pady=(4, 0))
+        self.pbar = ctk.CTkProgressBar(pf, progress_color=ACCENT)
+        self.pbar.grid(row=0, column=0, sticky="ew")
+        self.pbar.set(0)
+        self.status = ctk.CTkLabel(pf, text="", font=self.f_small, text_color=MUTED,
+                                   anchor="w")
+        self.status.grid(row=1, column=0, sticky="w", pady=(6, 0))
 
         # --- log card ---
-        lc = tk.Frame(outer, bg=CARD, highlightbackground=BORDER,
-                      highlightthickness=1, bd=0)
-        lc.pack(fill="both", expand=True)
-        ttk.Label(lc, text="ログ", style="Section.TLabel").pack(
-            anchor="w", padx=16, pady=(14, 4))
-        self.logbox = scrolledtext.ScrolledText(
-            lc, height=10, wrap="word", relief="flat", borderwidth=0,
-            bg=CARD, fg=TEXT, insertbackground=TEXT,
-            font=(self.fam, 10), padx=6, pady=4,
-        )
-        self.logbox.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+        lc = self._card(5, "ログ", expand=True)
+        lc.rowconfigure(1, weight=1)
+        self.logbox = ctk.CTkTextbox(lc, font=self.f_log, corner_radius=8, wrap="word")
+        self.logbox.grid(row=1, column=0, columnspan=3, sticky="nsew",
+                         padx=16, pady=(0, 16))
+
+    # -- appearance ----------------------------------------------------------
+    def _set_appearance(self, choice):
+        ctk.set_appearance_mode(APPEARANCE.get(choice, "system"))
 
     def _toggle_token(self):
-        self.token_entry.config(show="" if self.show_token.get() else "•")
+        self.token_entry.configure(show="" if self.show_token.get() else "•")
 
     def _pick_cookies(self):
         p = filedialog.askopenfilename(
@@ -297,29 +242,32 @@ class App:
         if total and total > 0:
             if self._indeterminate:
                 self.pbar.stop()
+                self.pbar.configure(mode="determinate")
                 self._indeterminate = False
-            self.pbar.config(mode="determinate", maximum=total, value=current)
-            self.status.config(text=f"{phase} {current}/{total}")
+            self.pbar.set(current / total)
+            self.status.configure(text=f"{phase} {current}/{total}")
         else:
             if not self._indeterminate:
-                self.pbar.config(mode="indeterminate")
-                self.pbar.start(12)
+                self.pbar.configure(mode="indeterminate")
+                self.pbar.start()
                 self._indeterminate = True
-            self.status.config(text=phase + " …")
+            self.status.configure(text=phase + " …")
 
     def _reset_progress(self):
         if self._indeterminate:
             self.pbar.stop()
+            self.pbar.configure(mode="determinate")
             self._indeterminate = False
-        self.pbar.config(mode="determinate", maximum=100, value=0)
-        self.status.config(text="")
+        self.pbar.set(0)
+        self.status.configure(text="")
 
     def _finish_progress(self, text):
         if self._indeterminate:
             self.pbar.stop()
+            self.pbar.configure(mode="determinate")
             self._indeterminate = False
-        self.pbar.config(mode="determinate", maximum=100, value=100)
-        self.status.config(text=text)
+        self.pbar.set(1)
+        self.status.configure(text=text)
 
     def _cfg_from_fields(self):
         return {
@@ -337,7 +285,7 @@ class App:
             messagebox.showerror("エラー", "Notion トークンを入力してください")
             return
         self.save()
-        self.sync_btn.config(state="disabled")
+        self.sync_btn.configure(state="disabled")
         self._reset_progress()
         threading.Thread(target=self._run, daemon=True).start()
 
@@ -363,11 +311,13 @@ class App:
             self.log("エラー: " + str(e))
             self.root.after(0, self._finish_progress, "エラー")
         finally:
-            self.root.after(0, lambda: self.sync_btn.config(state="normal"))
+            self.root.after(0, lambda: self.sync_btn.configure(state="normal"))
 
 
 def main():
-    root = tk.Tk()
+    ctk.set_default_color_theme("blue")
+    ctk.set_appearance_mode("system")
+    root = ctk.CTk()
     App(root)
     root.mainloop()
 

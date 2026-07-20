@@ -17,6 +17,8 @@ echo == exe をビルド中 (数分かかります) ==
   --paths "%APP%" ^
   --collect-all certifi ^
   --collect-all browser_cookie3 ^
+  --collect-all customtkinter ^
+  --collect-all darkdetect ^
   "%APP%\gui.py"
 
 echo.

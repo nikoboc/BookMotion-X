@@ -62,9 +62,21 @@ class App:
         self.token = tk.StringVar(value=cfg.get("notion_token", ""))
         self.parent = tk.StringVar(value=cfg.get("notion_parent_page_id", ""))
         self.dbid = tk.StringVar(value=cfg.get("notion_database_id", ""))
-        self.cookie_mode = tk.StringVar(value="file")  # 'file' | 'browser'
-        self.cookies_file = tk.StringVar(value="")
-        self.browser = tk.StringVar(value="chrome")
+        # 'file' now means "use the app's saved cookies"; 'browser' unchanged.
+        self.cookie_mode = tk.StringVar(value=cfg.get("cookie_mode", "file"))
+        saved_browser = cfg.get("browser", "chrome")
+        self.browser = tk.StringVar(
+            value=saved_browser if saved_browser in BROWSERS else "chrome")
+        self.cookies_status = tk.StringVar(value="")
+
+        # One-time migration: adopt a previously-referenced cookies.txt into the
+        # app data dir so upgrading users keep working without re-importing.
+        legacy = (cfg.get("cookies_file") or "").strip()
+        if legacy and not core.has_saved_cookies():
+            try:
+                core.import_cookies_file(legacy)
+            except Exception:
+                pass
         self.test_mode = tk.BooleanVar(value=False)
         self.show_token = tk.BooleanVar(value=False)
 
@@ -161,19 +173,25 @@ class App:
         self._label(c2, "Cookie 取得元", 1)
         cf = ctk.CTkFrame(c2, fg_color="transparent")
         cf.grid(row=1, column=1, columnspan=2, sticky="w", padx=(0, 16), pady=6)
-        ctk.CTkRadioButton(cf, text="cookies.txt", variable=self.cookie_mode,
-                           value="file", font=self.f_body).pack(side="left")
+        ctk.CTkRadioButton(cf, text="保存済み Cookie", variable=self.cookie_mode,
+                           value="file", font=self.f_body,
+                           command=self._on_cookie_mode_change).pack(side="left")
         ctk.CTkRadioButton(cf, text="ブラウザから自動", variable=self.cookie_mode,
-                           value="browser", font=self.f_body).pack(side="left", padx=(18, 0))
+                           value="browser", font=self.f_body,
+                           command=self._on_cookie_mode_change).pack(side="left", padx=(18, 0))
 
-        self._label(c2, "cookies.txt", 2)
+        self._label(c2, "Cookie データ", 2)
         ff = ctk.CTkFrame(c2, fg_color="transparent")
         ff.grid(row=2, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=6)
         ff.columnconfigure(0, weight=1)
-        ctk.CTkEntry(ff, textvariable=self.cookies_file, font=self.f_body).grid(
-            row=0, column=0, sticky="ew")
-        self._ghost(ff, "選択…", self._pick_cookies, width=88).grid(
-            row=0, column=1, padx=(8, 0))
+        self.cookies_status_lbl = ctk.CTkLabel(
+            ff, textvariable=self.cookies_status, font=self.f_small,
+            text_color=MUTED, anchor="w")
+        self.cookies_status_lbl.grid(row=0, column=0, sticky="w")
+        self.cookies_btn = self._ghost(ff, "取り込み…", self._import_cookies, width=104)
+        self.cookies_btn.grid(row=0, column=1, padx=(8, 0))
+        self.cookies_clear_btn = self._ghost(ff, "クリア", self._clear_cookies, width=72)
+        self.cookies_clear_btn.grid(row=0, column=2, padx=(8, 0))
 
         self._label(c2, "ブラウザ", 3)
         ctk.CTkOptionMenu(c2, variable=self.browser, values=BROWSERS, width=150,
@@ -212,20 +230,67 @@ class App:
         self.logbox.grid(row=1, column=0, columnspan=3, sticky="nsew",
                          padx=16, pady=(0, 16))
 
+        # Reflect the (possibly restored) cookie mode + saved-cookie status.
+        self._update_cookie_mode()
+
     # -- appearance ----------------------------------------------------------
+    def _update_cookie_mode(self):
+        """Reflect the selected cookie source on the Cookie data row."""
+        saved = self.cookie_mode.get() == "file"
+        n = core.saved_cookies_count()
+        if core.has_saved_cookies():
+            self.cookies_status.set(f"取り込み済み（{n} 件）" if n else "取り込み済み")
+        else:
+            self.cookies_status.set("未取り込み")
+        # Import applies only in saved mode; Clear also needs existing data.
+        self.cookies_btn.configure(state="normal" if saved else "disabled")
+        self.cookies_clear_btn.configure(
+            state="normal" if saved and core.has_saved_cookies() else "disabled")
+        self.cookies_status_lbl.configure(
+            text_color=MUTED if saved else ("gray70", "gray45"))
+
+    def _on_cookie_mode_change(self):
+        """User toggled the cookie source: update the row and persist the choice."""
+        self._update_cookie_mode()
+        self._persist()
+
+    def _persist(self):
+        """Write current fields to config.json silently (auto-save; no log line)."""
+        core.save_config(self._cfg_from_fields())
+
     def _set_appearance(self, choice):
         ctk.set_appearance_mode(APPEARANCE.get(choice, "system"))
 
     def _toggle_token(self):
         self.token_entry.configure(show="" if self.show_token.get() else "•")
 
-    def _pick_cookies(self):
+    def _import_cookies(self):
+        """Read a cookies.txt and store it as app data; the original is then unneeded."""
         p = filedialog.askopenfilename(
-            title="cookies.txt を選択",
+            title="cookies.txt を取り込む",
             filetypes=[("cookies.txt", "*.txt"), ("すべて", "*.*")],
         )
-        if p:
-            self.cookies_file.set(p)
+        if not p:
+            return
+        try:
+            n = core.import_cookies_file(p)
+        except Exception as e:
+            messagebox.showerror(
+                "取り込みエラー", f"cookies.txt を読み込めませんでした:\n{e}")
+            return
+        self._update_cookie_mode()
+        self.log(f"Cookie を取り込みました（{n} 件）。以後この元ファイルは不要です → "
+                 f"{core.get_cookies_path()}")
+
+    def _clear_cookies(self):
+        """Delete the app's saved cookies."""
+        if not core.has_saved_cookies():
+            return
+        if not messagebox.askyesno("確認", "保存済みの Cookie を削除しますか？"):
+            return
+        core.clear_saved_cookies()
+        self._update_cookie_mode()
+        self.log("保存済みの Cookie を削除しました。")
 
     def log(self, msg):
         self.root.after(0, self._append, str(msg))
@@ -274,6 +339,8 @@ class App:
             "notion_token": self.token.get().strip(),
             "notion_parent_page_id": self.parent.get().strip(),
             "notion_database_id": self.dbid.get().strip(),
+            "cookie_mode": self.cookie_mode.get(),
+            "browser": self.browser.get(),
         }
 
     def save(self):
@@ -292,11 +359,15 @@ class App:
     def _run(self):
         try:
             cfg = self._cfg_from_fields()
-            use_file = self.cookie_mode.get() == "file"
-            cookies_file = self.cookies_file.get().strip() if use_file else None
-            browser = None if use_file else self.browser.get()
-            if use_file and not cookies_file:
-                raise RuntimeError("cookies.txt を選択してください。")
+            if self.cookie_mode.get() == "file":
+                if not core.has_saved_cookies():
+                    raise RuntimeError(
+                        "保存済み Cookie がありません。「取り込み…」から cookies.txt を取り込んでください。")
+                cookies_file = str(core.get_cookies_path())
+                browser = None
+            else:
+                cookies_file = None
+                browser = self.browser.get()
             limit = 1 if self.test_mode.get() else None
             res = core.run_sync(
                 cfg, cookies_file, browser, limit, log=self.log, progress=self.on_progress

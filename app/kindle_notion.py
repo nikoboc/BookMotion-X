@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import sys
 import time
 from datetime import date
@@ -43,7 +44,13 @@ COLOR_JA = {"yellow": "黄色", "blue": "青", "pink": "ピンク", "orange": "�
 SCRIPT_DIR = Path(__file__).resolve().parent
 LOCAL_CONFIG = SCRIPT_DIR / "config.json"
 HOME_CONFIG = Path.home() / ".kindle-notion" / "config.json"
-_EMPTY = {"notion_token": "", "notion_parent_page_id": "", "notion_database_id": ""}
+_EMPTY = {
+    "notion_token": "",
+    "notion_parent_page_id": "",
+    "notion_database_id": "",
+    "cookie_mode": "file",
+    "browser": "chrome",
+}
 
 
 # ---------------------------------------------------------------- config
@@ -81,6 +88,54 @@ def save_config(cfg: dict) -> None:
     get_config_path().write_text(
         json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+
+
+# ---------------------------------------------------------------- saved cookies
+def get_cookies_path() -> Path:
+    """The app-managed copy of cookies.txt, kept next to config.json.
+
+    Importing a cookies.txt copies it here, so the original file is no longer
+    needed at run time — the cookie data lives in the app's own data dir.
+    """
+    return get_config_path().parent / "cookies.txt"
+
+
+def _count_cookies(path) -> int:
+    cj = MozillaCookieJar()
+    cj.load(str(path), ignore_discard=True, ignore_expires=True)
+    return len(cj)
+
+
+def import_cookies_file(src) -> int:
+    """Validate a cookies.txt and copy it into the app data dir. Returns count.
+
+    Raises if `src` is not a readable Netscape/Mozilla cookies.txt.
+    """
+    n = _count_cookies(src)  # parse first; a bad file raises before we overwrite
+    dst = get_cookies_path()
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(src, dst)
+    return n
+
+
+def has_saved_cookies() -> bool:
+    return get_cookies_path().exists()
+
+
+def saved_cookies_count() -> int:
+    p = get_cookies_path()
+    if not p.exists():
+        return 0
+    try:
+        return _count_cookies(p)
+    except Exception:
+        return 0
+
+
+def clear_saved_cookies() -> None:
+    p = get_cookies_path()
+    if p.exists():
+        p.unlink()
 
 
 # ---------------------------------------------------------------- session / cookies

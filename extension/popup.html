@@ -20,6 +20,14 @@
         cursor: pointer;
       }
       button:disabled { opacity: 0.6; cursor: default; }
+      button.secondary {
+        margin-top: 8px;
+        background: #f3f3f3;
+        border-color: #bbb;
+        color: #333;
+      }
+      .row { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+      a.link { font-size: 12px; color: #0a58ca; cursor: pointer; text-decoration: none; }
       #status { margin-top: 10px; font-size: 12px; color: #333; min-height: 16px; }
       #summary {
         margin-top: 8px;
@@ -35,8 +43,13 @@
     </style>
   </head>
   <body>
-    <h3>Kindle Highlights → JSON</h3>
-    <button id="run">notebook から取得</button>
+    <h3>Kindle → Notion</h3>
+    <button id="sync">Kindle → Notion 同期</button>
+    <button id="syncTest" class="secondary">テスト同期（先頭1冊だけ）</button>
+    <button id="run" class="secondary">JSON だけダウンロード</button>
+    <div class="row">
+      <a class="link" id="openOptions">⚙ Notion 設定</a>
+    </div>
     <div id="status"></div>
     <pre id="summary"></pre>
     <script src="popup.js"></script>

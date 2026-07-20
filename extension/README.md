@@ -9,8 +9,37 @@ Kindle のハイライト（`read.amazon.co.jp/notebook`）を、ブラウザ拡
 
 ## フェーズ
 
-- **フェーズ1（今ここ）**: 取得 → 整形 → `kindle_highlights.json` を自動ダウンロード
-- **フェーズ2（予定）**: 取得したデータを Notion API で DB に直接登録
+- **フェーズ1**: 取得 → 整形 → `kindle_highlights.json` を自動ダウンロード
+- **フェーズ2（実装済み）**: 取得したデータを Notion API で DB に直接登録
+
+## Notion 連携（フェーズ2）
+
+### 準備（初回のみ）
+
+1. [notion.so/my-integrations](https://www.notion.so/my-integrations) で内部インテグレーションを作成し、**Internal Integration Token** をコピー
+2. DB を置きたい**親ページ**を Notion で開き、右上「•••」→「連携」から作成したインテグレーションを追加（← これを忘れると 404）
+3. 拡張のポップアップ →「⚙ Notion 設定」を開き、**トークン**と**親ページ ID（URL 可）**を入力して保存
+4. 「Notion データベースを作成」をクリック → 指定の 6 列で DB が作られ、DB ID が保存される
+
+### 同期
+
+ポップアップの **「Kindle → Notion 同期」** をクリック。全書籍を取得 → 整形 → Notion に登録します。
+
+### データベースの列（左→右）
+
+| 列 | Notion 型 | 備考 |
+|---|---|---|
+| 引用文 | title | ハイライト本文。2000 字超は自動分割 |
+| 本のタイトル | rich_text | |
+| 本の著者 | rich_text | |
+| ハイライト位置 | number | |
+| ハイライト色 | select | 黄色 / 青 / ピンク / オレンジ |
+| 実行日 | date | 同期実行日 |
+
+- **並び順**: 本のタイトル昇順 → ハイライト位置昇順で挿入（Notion 側ビューにも同じソートを付けると確実）
+- **重複防止**: 注釈 ID を `chrome.storage` に記録し、再同期では新規分だけ追加
+- **メモのみの注釈**（ハイライト無し）はスキップ（このスキーマに引用文列しか無いため）
+- **レート**: Notion の平均 3 req/s に合わせて逐次登録。件数が多いと数分かかることあり
 
 ## 読み込み方法（Chrome / Edge 共通）
 
@@ -62,5 +91,6 @@ Kindle のハイライト（`read.amazon.co.jp/notebook`）を、ブラウザ拡
 |---|---|
 | `manifest.json` | 権限・エントリ定義（MV3。`scripting`/`tabs` 権限を使用） |
 | `background.js` | service worker。タブでの本一覧収集＋ヘッドレス fetch の司令塔 |
-| `offscreen.js` / `offscreen.html` | HTML を DOMParser でパース |
-| `popup.html` / `popup.js` | ボタン UI・進捗表示 |
+| `offscreen.js` / `offscreen.html` | HTML を DOMParser でパース（色・位置も抽出） |
+| `popup.html` / `popup.js` | ボタン UI・進捗表示（同期 / JSON） |
+| `options.html` / `options.js` | Notion トークン・親ページ設定、DB 作成 |

@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
   "name": "Kindle → Notion (self-built)",
-  "version": "0.2.0",
-  "description": "Fetch Kindle highlights from read.amazon.co.jp/notebook and export as JSON. Phase 1 (no Notion yet).",
+  "version": "0.3.0",
+  "description": "Fetch Kindle highlights from read.amazon.co.jp/notebook and import them into a Notion database.",
   "permissions": ["offscreen", "downloads", "storage", "scripting", "tabs"],
-  "host_permissions": ["https://read.amazon.co.jp/*"],
+  "host_permissions": ["https://read.amazon.co.jp/*", "https://api.notion.com/*"],
   "background": { "service_worker": "background.js" },
+  "options_ui": { "page": "options.html", "open_in_tab": true },
   "action": {
     "default_popup": "popup.html",
     "default_title": "Kindle Highlights"

@@ -26,6 +26,29 @@ function parseLibrary(html) {
   return { notLoggedIn: false, books };
 }
 
+// Kindle encodes highlight color as a `kp-notebook-highlight-<color>` class,
+// and the header text also names it in Japanese. Try the class first, then
+// fall back to the header text.
+function extractColor(row, headerText) {
+  const colored = row.querySelector('[class*="kp-notebook-highlight-"]');
+  if (colored) {
+    const m = colored.className.match(
+      /kp-notebook-highlight-(yellow|blue|pink|orange)/
+    );
+    if (m) {
+      return { yellow: "黄色", blue: "青", pink: "ピンク", orange: "オレンジ" }[
+        m[1]
+      ];
+    }
+  }
+  const h = headerText || "";
+  if (h.includes("黄")) return "黄色";
+  if (h.includes("青")) return "青";
+  if (h.includes("ピンク")) return "ピンク";
+  if (h.includes("オレンジ")) return "オレンジ";
+  return null;
+}
+
 function parseAnnotations(html) {
   const d = toDoc(html);
 
@@ -55,11 +78,15 @@ function parseAnnotations(html) {
     const highlight = hl ? hl.textContent.trim() : null;
     const noteText = note ? note.textContent.trim() : null;
     if (!highlight && !noteText) return;
+    const headerText = header
+      ? header.textContent.replace(/\s+/g, " ").trim()
+      : null;
     annotations.push({
       id: row.id || null,
       highlight: highlight || null,
       note: noteText || null,
-      header: header ? header.textContent.replace(/\s+/g, " ").trim() : null,
+      header: headerText,
+      color: extractColor(row, headerText),
       location: loc ? loc.value : null,
     });
   });

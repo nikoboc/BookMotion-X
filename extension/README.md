@@ -1,10 +1,11 @@
 # Kindle → Notion 拡張機能（自作）
 
-Kindle のハイライト（`read.amazon.co.jp/notebook`）を、ブラウザ拡張が**裏で自分でアクセス**して取得する自作ツール。
+Kindle のハイライト（`read.amazon.co.jp/notebook`）を、ブラウザ拡張が**自分でアクセス**して取得する自作ツール。
 
-- **方式A（ヘッドレス）**: タブを開かず、service worker が直接 `fetch` する
-- ログイン済みセッションの Cookie を使うので、Cookie 抜き取りも管理者権限も不要
-- MV3 の service worker には DOMParser が無いため、HTML パースは offscreen document に委譲
+- ログイン済みセッションを使うので、Cookie 抜き取りも管理者権限も不要
+- **本一覧の取得**: notebook の左サイドバーはスクロールで遅延ロードされる（素の fetch だと最初の ~14 冊しか取れない）。そこで拡張が **notebook をバックグラウンドタブで開き、injected content script でサイドバーを自動スクロール**して全冊をロード → 書籍リストを回収 → タブを閉じる
+- **各書籍のハイライト取得**: `?asin=` エンドポイントはサーバー描画 HTML を返すため、こちらは **ヘッドレス fetch** で取得
+- MV3 の service worker には DOMParser が無いため、ハイライト HTML のパースは offscreen document に委譲
 
 ## フェーズ
 
@@ -52,14 +53,14 @@ Kindle のハイライト（`read.amazon.co.jp/notebook`）を、ブラウザ拡
 ## うまくいかない時
 
 - **「Amazon にログインしていません」** → `read.amazon.co.jp` でログインし直して再実行
-- **book が 0 件 / highlight が 0 件** → ページ構造が想定と違う可能性。`chrome://extensions` の拡張の **「service worker」** と **offscreen** の DevTools でエラーを確認。セレクタ（`offscreen.js`）を実データに合わせて調整する
-- **裏 fetch に Cookie が乗らない**（毎回ログイン画面が返る）稀なケース → 方式B（裏タブ + content script）にフォールバック
+- **book が 0 件 / highlight が 0 件** → ページ構造が想定と違う可能性。`chrome://extensions` の拡張の **「service worker」** と **offscreen** の DevTools でエラーを確認。セレクタ（`offscreen.js` / `background.js` の `scrollAndCollectBooks`）を実データに合わせて調整する
+- **本の数が少ない（例: 14 冊だけ）** → バックグラウンドタブでの自動スクロールが遅延ロードを発火できていない可能性。`background.js` の `discoverBooks` で `active: false` を `active: true` にすると、タブを前面表示してより確実にロードできる（一瞬タブが開く）
 
 ## ファイル構成
 
 | ファイル | 役割 |
 |---|---|
-| `manifest.json` | 権限・エントリ定義（MV3） |
-| `background.js` | service worker。fetch とページネーションの司令塔 |
+| `manifest.json` | 権限・エントリ定義（MV3。`scripting`/`tabs` 権限を使用） |
+| `background.js` | service worker。タブでの本一覧収集＋ヘッドレス fetch の司令塔 |
 | `offscreen.js` / `offscreen.html` | HTML を DOMParser でパース |
 | `popup.html` / `popup.js` | ボタン UI・進捗表示 |

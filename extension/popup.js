@@ -26,6 +26,11 @@ function showDone(data) {
       "Amazon にログインしていません。ブラウザで read.amazon.co.jp を開いてログイン後、再実行してください。";
     return;
   }
+  if (data.error === "no_books") {
+    statusEl.textContent =
+      "本が0冊でした。ログイン状態を確認して再実行してください（改善しない場合はタブを前面で開く方式に切り替えます）。";
+    return;
+  }
   if (data.error) {
     statusEl.textContent = "エラー: " + data.error;
     return;

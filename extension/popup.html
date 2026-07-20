@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body {
+        font-family: system-ui, "Segoe UI", sans-serif;
+        width: 320px;
+        padding: 12px;
+        margin: 0;
+      }
+      h3 { margin: 0 0 8px; font-size: 14px; }
+      button {
+        width: 100%;
+        padding: 8px 10px;
+        font-size: 13px;
+        border: 1px solid #d5a020;
+        background: #f3c33b;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      button:disabled { opacity: 0.6; cursor: default; }
+      #status { margin-top: 10px; font-size: 12px; color: #333; min-height: 16px; }
+      #summary {
+        margin-top: 8px;
+        font-size: 11px;
+        white-space: pre-wrap;
+        color: #555;
+        max-height: 160px;
+        overflow: auto;
+        background: #f6f6f6;
+        border-radius: 6px;
+        padding: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <h3>Kindle Highlights → JSON</h3>
+    <button id="run">notebook から取得</button>
+    <div id="status"></div>
+    <pre id="summary"></pre>
+    <script src="popup.js"></script>
+  </body>
+</html>

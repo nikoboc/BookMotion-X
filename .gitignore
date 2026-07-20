@@ -2,3 +2,10 @@
 .env
 .env.*
 .mcp.json
+cookies.txt
+cookies.json
+*.cookies.txt
+
+# Scraper output / debug
+debug_*.html
+test_output.json

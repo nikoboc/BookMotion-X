@@ -276,13 +276,17 @@ async function createNotionDatabase(token, parentPageId) {
   const body = {
     parent: { type: "page_id", page_id: parentPageId },
     title: [{ type: "text", text: { content: "Kindle Highlights" } }],
-    // Property insertion order = column order (title is always first).
+    // NOTE: Notion's API ignores property order on database creation — the UI
+    // shows columns in an internal (arbitrary) order regardless of the order
+    // here or of adding them one-by-one. The public API has no way to set
+    // column order, so arrange the columns once by hand after first creation
+    // (the DB is created once and reused, so this is a one-time step).
     properties: {
-      引用文: { title: {} },
-      本のタイトル: { rich_text: {} },
-      本の著者: { rich_text: {} },
-      ハイライト位置: { number: {} },
-      ハイライト色: {
+      ハイライト文: { title: {} },
+      書籍名: { rich_text: {} },
+      著者名: { rich_text: {} },
+      位置: { number: {} },
+      マーカー色: {
         select: {
           options: [
             { name: "黄色", color: "yellow" },
@@ -349,16 +353,16 @@ function richText(content) {
 
 function pageProperties(r) {
   const props = {
-    引用文: { title: richText(r.quote) },
-    本のタイトル: { rich_text: richText(r.title) },
-    本の著者: { rich_text: richText(r.author) },
+    ハイライト文: { title: richText(r.quote) },
+    書籍名: { rich_text: richText(r.title) },
+    著者名: { rich_text: richText(r.author) },
     実行日: { date: { start: r.date } },
     注釈ID: { rich_text: richText(r.key) },
   };
   if (r.location != null && !Number.isNaN(r.location)) {
-    props["ハイライト位置"] = { number: r.location };
+    props["位置"] = { number: r.location };
   }
-  if (r.color) props["ハイライト色"] = { select: { name: r.color } };
+  if (r.color) props["マーカー色"] = { select: { name: r.color } };
   return props;
 }
 
@@ -451,7 +455,7 @@ async function sync(limit) {
   progress(`既存 ${existing.size} 件を確認`);
 
   // Discover the full library (tab + auto-scroll), then process books in
-  // 本のタイトル昇順 so creation order == 本タイトル昇順→位置昇順.
+  // 書籍名昇順 so creation order == 書籍名昇順→位置昇順.
   progress("notebook をタブで開いて全書籍を読み込み中…");
   const lib = await discoverBooks();
   if (lib.notLoggedIn) return { error: "not_logged_in" };

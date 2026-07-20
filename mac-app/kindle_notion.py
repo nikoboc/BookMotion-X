@@ -316,15 +316,20 @@ def notion_fetch(token: str, path: str, method: str, body=None):
 
 
 def create_database(token: str, parent_page_id: str):
+    # NOTE: Notion's API ignores property order on database creation — the UI
+    # shows columns in an internal (arbitrary) order regardless of the order
+    # below or of adding them one-by-one via PATCH. The public API has no way to
+    # set column order, so arrange the columns once by hand after first creation
+    # (the DB is created once and reused, so this is a one-time step).
     body = {
         "parent": {"type": "page_id", "page_id": parent_page_id},
         "title": [{"type": "text", "text": {"content": "Kindle Highlights"}}],
         "properties": {
-            "引用文": {"title": {}},
-            "本のタイトル": {"rich_text": {}},
-            "本の著者": {"rich_text": {}},
-            "ハイライト位置": {"number": {}},
-            "ハイライト色": {
+            "ハイライト文": {"title": {}},
+            "書籍名": {"rich_text": {}},
+            "著者名": {"rich_text": {}},
+            "位置": {"number": {}},
+            "マーカー色": {
                 "select": {
                     "options": [
                         {"name": "黄色", "color": "yellow"},
@@ -380,16 +385,16 @@ def rich_text(content: str):
 
 def page_properties(r: dict):
     props = {
-        "引用文": {"title": rich_text(r["quote"])},
-        "本のタイトル": {"rich_text": rich_text(r["title"])},
-        "本の著者": {"rich_text": rich_text(r["author"])},
+        "ハイライト文": {"title": rich_text(r["quote"])},
+        "書籍名": {"rich_text": rich_text(r["title"])},
+        "著者名": {"rich_text": rich_text(r["author"])},
         "実行日": {"date": {"start": r["date"]}},
         "注釈ID": {"rich_text": rich_text(r["key"])},
     }
     if r.get("location") is not None:
-        props["ハイライト位置"] = {"number": r["location"]}
+        props["位置"] = {"number": r["location"]}
     if r.get("color"):
-        props["ハイライト色"] = {"select": {"name": r["color"]}}
+        props["マーカー色"] = {"select": {"name": r["color"]}}
     return props
 
 

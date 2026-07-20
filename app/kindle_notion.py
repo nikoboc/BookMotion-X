@@ -2,7 +2,7 @@
 """Kindle highlights → Notion, as a standalone (Mac click-to-run) app.
 
 Browser-free: it talks to read.amazon.co.jp directly with `requests`, using the
-login cookies from your browser (browser_cookie3) or an exported cookies.txt.
+login cookies from an exported cookies.txt.
 
 The library sidebar is paginated server-side via `/notebook?library=list`
 (+ a `token`), so we loop that to get every book — no headless browser needed.
@@ -35,22 +35,13 @@ UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
-DOMAIN = "amazon.co.jp"
-# Browser cookie sources to try, in order (Mac-friendly first).
-BROWSER_ORDER = ["chrome", "safari", "edge", "brave", "firefox", "chromium"]
 
 COLOR_JA = {"yellow": "黄色", "blue": "青", "pink": "ピンク", "orange": "オレンジ"}
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 LOCAL_CONFIG = SCRIPT_DIR / "config.json"
 HOME_CONFIG = Path.home() / ".kindle-notion" / "config.json"
-_EMPTY = {
-    "notion_token": "",
-    "notion_parent_page_id": "",
-    "notion_database_id": "",
-    "cookie_mode": "file",
-    "browser": "chrome",
-}
+_EMPTY = {"notion_token": "", "notion_parent_page_id": "", "notion_database_id": ""}
 
 
 # ---------------------------------------------------------------- config
@@ -139,35 +130,19 @@ def clear_saved_cookies() -> None:
 
 
 # ---------------------------------------------------------------- session / cookies
-def load_cookies(cookies_file, browser, log=print):
-    if cookies_file:
-        cj = MozillaCookieJar()
-        cj.load(cookies_file, ignore_discard=True, ignore_expires=True)
-        log(f"cookies.txt から {len(cj)} 件のCookieを読み込みました")
-        return cj
-    import browser_cookie3
-
-    for name in [browser] if browser else BROWSER_ORDER:
-        fn = getattr(browser_cookie3, name, None)
-        if fn is None:
-            continue
-        try:
-            cj = fn(domain_name=DOMAIN)
-            if len(cj) > 0:
-                log(f"{name} から {len(cj)} 件のCookieを読み込みました")
-                return cj
-        except Exception as e:
-            log(f"[info] {name}: {e}")
-    raise RuntimeError(
-        f"{DOMAIN} のCookieが見つかりませんでした。ブラウザで {BASE} にログインするか、"
-        "cookies.txt を指定してください。"
-    )
+def load_cookies(cookies_file, log=print):
+    if not cookies_file:
+        raise RuntimeError("cookies.txt が指定されていません。")
+    cj = MozillaCookieJar()
+    cj.load(cookies_file, ignore_discard=True, ignore_expires=True)
+    log(f"cookies.txt から {len(cj)} 件のCookieを読み込みました")
+    return cj
 
 
-def build_session(cookies_file, browser, log=print) -> requests.Session:
+def build_session(cookies_file, log=print) -> requests.Session:
     s = requests.Session()
     s.headers.update({"User-Agent": UA, "Accept-Language": "ja,en;q=0.9"})
-    for c in load_cookies(cookies_file, browser, log):
+    for c in load_cookies(cookies_file, log):
         s.cookies.set_cookie(c)
     return s
 
@@ -539,12 +514,12 @@ def notion_sync(token, parent_page_id, database_id, books, today, log=print, pro
     }
 
 
-def run_sync(cfg: dict, cookies_file=None, browser=None, limit=None, log=print, progress=None) -> dict:
+def run_sync(cfg: dict, cookies_file=None, limit=None, log=print, progress=None) -> dict:
     """End-to-end sync used by both the CLI and the GUI. Persists a newly
     created database_id back into cfg + config.json."""
     if not cfg.get("notion_token"):
         raise RuntimeError("Notion トークンが未設定です。")
-    session = build_session(cookies_file, browser, log)
+    session = build_session(cookies_file, log)
     books = fetch_kindle(session, limit, log, progress)
     if not books:
         raise RuntimeError("本が0冊でした。ログイン状態を確認してください。")
@@ -566,8 +541,7 @@ def run_sync(cfg: dict, cookies_file=None, browser=None, limit=None, log=print, 
 # ---------------------------------------------------------------- main (CLI)
 def main() -> int:
     ap = argparse.ArgumentParser(description="Kindle highlights → Notion (browser-free)")
-    ap.add_argument("-c", "--cookies-file", help="エクスポート済み cookies.txt")
-    ap.add_argument("-b", "--browser", help="chrome|safari|edge|brave|firefox")
+    ap.add_argument("-c", "--cookies-file", required=True, help="エクスポート済み cookies.txt")
     ap.add_argument("--limit", type=int, help="先頭 N 冊だけ（テスト用）")
     args = ap.parse_args()
 
@@ -576,7 +550,7 @@ def main() -> int:
         print(f"config.json に notion_token を設定してください: {get_config_path()}")
         return 1
     try:
-        res = run_sync(cfg, args.cookies_file, args.browser, args.limit)
+        res = run_sync(cfg, args.cookies_file, args.limit)
     except RuntimeError as e:
         print("エラー:", e)
         return 2

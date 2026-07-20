@@ -16,7 +16,6 @@ echo == exe をビルド中 (数分かかります) ==
 ".buildvenv\Scripts\pyinstaller.exe" --noconfirm --windowed --onefile --name "KindleNotion" ^
   --paths "%APP%" ^
   --collect-all certifi ^
-  --collect-all browser_cookie3 ^
   --collect-all customtkinter ^
   --collect-all darkdetect ^
   "%APP%\gui.py"

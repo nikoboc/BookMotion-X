@@ -14,8 +14,6 @@ import customtkinter as ctk
 
 import kindle_notion as core
 
-BROWSERS = ["chrome", "safari", "edge", "brave", "firefox"]
-
 # indigo accent, works on both light and dark backgrounds
 ACCENT = "#4F46E5"
 ACCENT_HOVER = "#4338CA"
@@ -62,11 +60,6 @@ class App:
         self.token = tk.StringVar(value=cfg.get("notion_token", ""))
         self.parent = tk.StringVar(value=cfg.get("notion_parent_page_id", ""))
         self.dbid = tk.StringVar(value=cfg.get("notion_database_id", ""))
-        # 'file' now means "use the app's saved cookies"; 'browser' unchanged.
-        self.cookie_mode = tk.StringVar(value=cfg.get("cookie_mode", "file"))
-        saved_browser = cfg.get("browser", "chrome")
-        self.browser = tk.StringVar(
-            value=saved_browser if saved_browser in BROWSERS else "chrome")
         self.cookies_status = tk.StringVar(value="")
 
         # One-time migration: adopt a previously-referenced cookies.txt into the
@@ -170,19 +163,9 @@ class App:
 
         # --- card: 取得設定 ---
         c2 = self._card(2, "取得設定")
-        self._label(c2, "Cookie 取得元", 1)
-        cf = ctk.CTkFrame(c2, fg_color="transparent")
-        cf.grid(row=1, column=1, columnspan=2, sticky="w", padx=(0, 16), pady=6)
-        ctk.CTkRadioButton(cf, text="保存済み Cookie", variable=self.cookie_mode,
-                           value="file", font=self.f_body,
-                           command=self._on_cookie_mode_change).pack(side="left")
-        ctk.CTkRadioButton(cf, text="ブラウザから自動", variable=self.cookie_mode,
-                           value="browser", font=self.f_body,
-                           command=self._on_cookie_mode_change).pack(side="left", padx=(18, 0))
-
-        self._label(c2, "Cookie データ", 2)
+        self._label(c2, "Cookie（cookies.txt）", 1)
         ff = ctk.CTkFrame(c2, fg_color="transparent")
-        ff.grid(row=2, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=6)
+        ff.grid(row=1, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=6)
         ff.columnconfigure(0, weight=1)
         self.cookies_status_lbl = ctk.CTkLabel(
             ff, textvariable=self.cookies_status, font=self.f_small,
@@ -193,15 +176,9 @@ class App:
         self.cookies_clear_btn = self._ghost(ff, "クリア", self._clear_cookies, width=72)
         self.cookies_clear_btn.grid(row=0, column=2, padx=(8, 0))
 
-        self._label(c2, "ブラウザ", 3)
-        ctk.CTkOptionMenu(c2, variable=self.browser, values=BROWSERS, width=150,
-                          font=self.f_body, fg_color=ACCENT, button_color=ACCENT,
-                          button_hover_color=ACCENT_HOVER).grid(
-            row=3, column=1, sticky="w", padx=(0, 16), pady=6)
-
         ctk.CTkCheckBox(c2, text="テスト（先頭 1 冊だけ）", variable=self.test_mode,
                         font=self.f_body).grid(
-            row=4, column=1, columnspan=2, sticky="w", padx=(0, 16), pady=(6, 16))
+            row=2, column=1, columnspan=2, sticky="w", padx=(0, 16), pady=(6, 16))
 
         # --- action row ---
         ar = ctk.CTkFrame(self.outer, fg_color="transparent")
@@ -230,33 +207,19 @@ class App:
         self.logbox.grid(row=1, column=0, columnspan=3, sticky="nsew",
                          padx=16, pady=(0, 16))
 
-        # Reflect the (possibly restored) cookie mode + saved-cookie status.
-        self._update_cookie_mode()
+        # Reflect the saved-cookie status on the Cookie row.
+        self._refresh_cookie_status()
 
     # -- appearance ----------------------------------------------------------
-    def _update_cookie_mode(self):
-        """Reflect the selected cookie source on the Cookie data row."""
-        saved = self.cookie_mode.get() == "file"
+    def _refresh_cookie_status(self):
+        """Show whether cookies are saved and enable Clear only when they are."""
         n = core.saved_cookies_count()
         if core.has_saved_cookies():
             self.cookies_status.set(f"取り込み済み（{n} 件）" if n else "取り込み済み")
         else:
             self.cookies_status.set("未取り込み")
-        # Import applies only in saved mode; Clear also needs existing data.
-        self.cookies_btn.configure(state="normal" if saved else "disabled")
         self.cookies_clear_btn.configure(
-            state="normal" if saved and core.has_saved_cookies() else "disabled")
-        self.cookies_status_lbl.configure(
-            text_color=MUTED if saved else ("gray70", "gray45"))
-
-    def _on_cookie_mode_change(self):
-        """User toggled the cookie source: update the row and persist the choice."""
-        self._update_cookie_mode()
-        self._persist()
-
-    def _persist(self):
-        """Write current fields to config.json silently (auto-save; no log line)."""
-        core.save_config(self._cfg_from_fields())
+            state="normal" if core.has_saved_cookies() else "disabled")
 
     def _set_appearance(self, choice):
         ctk.set_appearance_mode(APPEARANCE.get(choice, "system"))
@@ -278,7 +241,7 @@ class App:
             messagebox.showerror(
                 "取り込みエラー", f"cookies.txt を読み込めませんでした:\n{e}")
             return
-        self._update_cookie_mode()
+        self._refresh_cookie_status()
         self.log(f"Cookie を取り込みました（{n} 件）。以後この元ファイルは不要です → "
                  f"{core.get_cookies_path()}")
 
@@ -289,7 +252,7 @@ class App:
         if not messagebox.askyesno("確認", "保存済みの Cookie を削除しますか？"):
             return
         core.clear_saved_cookies()
-        self._update_cookie_mode()
+        self._refresh_cookie_status()
         self.log("保存済みの Cookie を削除しました。")
 
     def log(self, msg):
@@ -339,8 +302,6 @@ class App:
             "notion_token": self.token.get().strip(),
             "notion_parent_page_id": self.parent.get().strip(),
             "notion_database_id": self.dbid.get().strip(),
-            "cookie_mode": self.cookie_mode.get(),
-            "browser": self.browser.get(),
         }
 
     def save(self):
@@ -359,18 +320,13 @@ class App:
     def _run(self):
         try:
             cfg = self._cfg_from_fields()
-            if self.cookie_mode.get() == "file":
-                if not core.has_saved_cookies():
-                    raise RuntimeError(
-                        "保存済み Cookie がありません。「取り込み…」から cookies.txt を取り込んでください。")
-                cookies_file = str(core.get_cookies_path())
-                browser = None
-            else:
-                cookies_file = None
-                browser = self.browser.get()
+            if not core.has_saved_cookies():
+                raise RuntimeError(
+                    "cookies.txt が取り込まれていません。「取り込み…」から取り込んでください。")
+            cookies_file = str(core.get_cookies_path())
             limit = 1 if self.test_mode.get() else None
             res = core.run_sync(
-                cfg, cookies_file, browser, limit, log=self.log, progress=self.on_progress
+                cfg, cookies_file, limit, log=self.log, progress=self.on_progress
             )
             self.root.after(0, lambda: self.dbid.set(cfg.get("notion_database_id", "")))
             self.log(

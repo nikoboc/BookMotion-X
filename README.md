@@ -35,7 +35,7 @@ Kindle のハイライト（`read.amazon.co.jp/notebook`）を取得し、**Noti
 │   ├── README.md          セットアップと実行方法（GUI / CLI）
 │   ├── kindle_notion.py   コア。Kindle 取得＋整形＋Notion 登録（CLI エントリでもある）
 │   ├── gui.py             Tkinter GUI（.app / .exe のエントリポイント）
-│   ├── requirements.txt   依存（requests / beautifulsoup4 / browser_cookie3）
+│   ├── requirements.txt   依存（requests / beautifulsoup4 / customtkinter）
 │   └── config.example.json 設定ファイルの見本（実体 config.json は .gitignore 済み）
 │
 ├── mac-app/               【実装B・Mac 固有】起動とパッケージング（../app を参照）
@@ -82,9 +82,9 @@ Kindle のハイライト（`read.amazon.co.jp/notebook`）を取得し、**Noti
 詳細は [extension/README.md](extension/README.md)。
 
 ### 実装B：Python アプリ（Mac / Windows）
-1. `read.amazon.co.jp` にログインしておく。
+1. `read.amazon.co.jp` にログイン済みのブラウザから `cookies.txt` を書き出しておく（「Get cookies.txt LOCALLY」等の拡張機能）。
 2. `mac-app/run.command`（Mac）/ `win-app/run.bat`（Windows）をダブルクリック、または `app/gui.py` を起動。
-3. トークン・親ページを入力 → 「Notion へ同期」。
+3. トークン・親ページを入力し、`cookies.txt` を「取り込み」→「Notion へ同期」。
 
 詳細は [app/README.md](app/README.md)、ビルド手順は [mac-app/BUILD_RUN_mac.md](mac-app/BUILD_RUN_mac.md) / [win-app/BUILD_RUN_win.md](win-app/BUILD_RUN_win.md)。
 

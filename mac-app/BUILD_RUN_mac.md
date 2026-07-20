@@ -15,7 +15,7 @@ cd mac-app
 |---|---|
 | **Python 3** | ビルドに必要。`python3 --version` で確認。無ければ `xcode-select --install`（または `brew install python`） |
 | **Tk**（Homebrew の Python のみ） | GUI ビルドに必要なことがある: `brew install python-tk` |
-| **Kindle ログイン** | その Mac のブラウザで `read.amazon.co.jp` にログイン済みであること（または `cookies.txt` を用意） |
+| **Kindle Cookie** | `read.amazon.co.jp` にログイン済みのブラウザから `cookies.txt` を書き出しておくこと（「Get cookies.txt LOCALLY」等の拡張機能） |
 | **Notion トークン** | [notion.so/my-integrations](https://www.notion.so/my-integrations) で内部インテグレーションを作成 → トークンをコピー |
 | **Notion 親ページ** | DB を置く親ページを開き「•••」→「連携」→ 作成したインテグレーションを追加（**忘れると 404**） |
 
@@ -49,7 +49,7 @@ Finder で **`build_mac.command` をダブルクリック**（または以下）
 
 1. **Notion トークン**
 2. **親ページ URL**
-3. **Cookie 取得元** … `cookies.txt`（「選択…」で指定）／ **ブラウザから自動**（ブラウザ名を選択）
+3. **Cookie** … 「**取り込み…**」で `cookies.txt` を取り込む（取り込み後は元ファイル不要）
 4. **「保存」** を押す（`DB ID` は空でOK。初回に自動作成して欄へ書き戻されます）
 
 > 設定は `~/Library/Application Support/KindleNotion/config.json` に自動保存され、次回起動時に復元されます。手でファイルを触る必要はありません。
@@ -88,15 +88,13 @@ python3 -m venv .venv
 **実行**:
 
 ```bash
+./.venv/bin/python ../app/kindle_notion.py -c cookies.txt             # 実行（cookies.txt は必須）
 ./.venv/bin/python ../app/kindle_notion.py -c cookies.txt --limit 1   # 先頭1冊でテスト
-./.venv/bin/python ../app/kindle_notion.py -b safari                  # Safari の Cookie を使う
-./.venv/bin/python ../app/kindle_notion.py -c cookies.txt             # 通常実行
 ```
 
 | 引数 | 意味 |
 |---|---|
-| `-c, --cookies-file` | エクスポート済み `cookies.txt` を使う |
-| `-b, --browser` | Cookie 取得元ブラウザ: `chrome` / `safari` / `edge` / `brave` / `firefox` |
+| `-c, --cookies-file` | エクスポート済み `cookies.txt`（**必須**） |
 | `--limit N` | 先頭 N 冊だけ処理（テスト用） |
 
 ---
@@ -108,6 +106,6 @@ python3 -m venv .venv
 | `python3 が見つかりません` | `xcode-select --install` か `brew install python` |
 | ビルドで Tk エラー | `brew install python-tk` |
 | `.app` が開けない（Gatekeeper） | 右クリック →「開く」（初回のみ） |
-| 「ログインしていません」 | ブラウザで `read.amazon.co.jp` に再ログイン、または `cookies.txt` を指定 |
-| Cookie が読めない（`browser_cookie3` 失敗） | 「Get cookies.txt LOCALLY」等で `cookies.txt` を書き出して使う |
+| 「ログインしていません」 | `cookies.txt` が古い可能性。`read.amazon.co.jp` にログインし直して書き出し、再度「取り込み…」 |
+| `cookies.txt` の書き出し方 | 「Get cookies.txt LOCALLY」等の拡張機能で `read.amazon.co.jp` の Cookie を書き出す |
 | 本が少ない | ログインが切れている可能性。ログインし直して再実行 |

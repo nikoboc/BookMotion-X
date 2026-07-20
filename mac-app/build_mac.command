@@ -14,7 +14,6 @@ echo "== .appをビルド中 (数分かかります) =="
   --osx-bundle-identifier "com.local.kindlenotion" \
   --paths "$APP" \
   --collect-all certifi \
-  --collect-all browser_cookie3 \
   --collect-all customtkinter \
   --collect-all darkdetect \
   "$APP/gui.py"

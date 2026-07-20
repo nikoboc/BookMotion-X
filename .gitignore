@@ -15,3 +15,6 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# Local app config (contains the Notion token) — keep config.example.json only
+config.json

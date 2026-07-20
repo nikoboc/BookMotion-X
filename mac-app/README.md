@@ -22,7 +22,8 @@ Kindle のハイライト（`read.amazon.co.jp/notebook`）を取得して Notio
 
 ### 2. 設定ファイル
 
-初回実行すると `~/.kindle-notion/config.json` が作られます。以下を記入：
+`config.json` に記入します。**置き場所は `mac-app/config.json`（このスクリプトの隣）**。
+初回実行時に無ければ自動生成されます。
 
 ```json
 {
@@ -31,7 +32,9 @@ Kindle のハイライト（`read.amazon.co.jp/notebook`）を取得して Notio
   "notion_database_id": ""
 }
 ```
-`notion_database_id` は空でOK（初回に自動作成して書き戻します）。
+- `notion_database_id` は空でOK（初回に自動作成して書き戻します）
+- 探索順は **`mac-app/config.json` → 無ければ `~/.kindle-notion/config.json`**
+- `config.json` は `.gitignore` 済み（トークンはコミットされません。`config.example.json` は見本）
 
 ### 3. 実行
 

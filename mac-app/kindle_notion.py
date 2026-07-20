@@ -38,16 +38,31 @@ DOMAIN = "amazon.co.jp"
 # Browser cookie sources to try, in order (Mac-friendly first).
 BROWSER_ORDER = ["chrome", "safari", "edge", "brave", "firefox", "chromium"]
 
-CONFIG_DIR = Path.home() / ".kindle-notion"
-CONFIG_PATH = CONFIG_DIR / "config.json"
 COLOR_JA = {"yellow": "黄色", "blue": "青", "pink": "ピンク", "orange": "オレンジ"}
+
+# config.json is looked for next to this script first (mac-app/config.json),
+# then ~/.kindle-notion/config.json. New files are created next to the script.
+SCRIPT_DIR = Path(__file__).resolve().parent
+LOCAL_CONFIG = SCRIPT_DIR / "config.json"
+HOME_CONFIG = Path.home() / ".kindle-notion" / "config.json"
+_config_path: Path | None = None
 
 
 # ---------------------------------------------------------------- config
+def _resolve_config_path() -> Path:
+    if LOCAL_CONFIG.exists():
+        return LOCAL_CONFIG
+    if HOME_CONFIG.exists():
+        return HOME_CONFIG
+    return LOCAL_CONFIG
+
+
 def load_config() -> dict:
-    CONFIG_DIR.mkdir(exist_ok=True)
-    if not CONFIG_PATH.exists():
-        CONFIG_PATH.write_text(
+    global _config_path
+    _config_path = _resolve_config_path()
+    if not _config_path.exists():
+        _config_path.parent.mkdir(parents=True, exist_ok=True)
+        _config_path.write_text(
             json.dumps(
                 {"notion_token": "", "notion_parent_page_id": "", "notion_database_id": ""},
                 ensure_ascii=False,
@@ -55,14 +70,14 @@ def load_config() -> dict:
             ),
             encoding="utf-8",
         )
-        print(f"設定ファイルを作成しました: {CONFIG_PATH}")
+        print(f"設定ファイルを作成しました: {_config_path}")
         print("notion_token と notion_parent_page_id を記入して、もう一度実行してください。")
         sys.exit(1)
-    return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    return json.loads(_config_path.read_text(encoding="utf-8"))
 
 
 def save_config(cfg: dict) -> None:
-    CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    _config_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 # ---------------------------------------------------------------- session / cookies
@@ -439,7 +454,7 @@ def main() -> int:
 
     cfg = load_config()
     if not cfg.get("notion_token"):
-        print(f"config.json に notion_token を設定してください: {CONFIG_PATH}")
+        print(f"config.json に notion_token を設定してください: {_config_path}")
         return 1
 
     session = build_session(args.cookies_file, args.browser)

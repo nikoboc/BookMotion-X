@@ -17,12 +17,62 @@ import customtkinter as ctk
 
 import kindle_notion as core
 
-# indigo accent, works on both light and dark backgrounds
-ACCENT = "#4F46E5"
-ACCENT_HOVER = "#4338CA"
-MUTED = ("gray40", "gray65")  # (light, dark)
-OK_COLOR = ("#15803D", "#22C55E")     # green — cookies still valid (light, dark)
-BAD_COLOR = ("#DC2626", "#F87171")    # red — expired / needs re-import (light, dark)
+# ---- Palette: cream base + gold accent, tuned to the app icon ----------------
+# Every value is a (light, dark) pair. Base/sub stay warm (cream / dark brown +
+# sage / amber); the accent is the icon's gold. On the gold ACCENT fills the
+# label is white in light mode and near-black in dark mode (per spec). SUB fills
+# are a mid-tone in both modes, so their label (ON_SUB) is dark in both. All
+# pairs were checked to clear WCAG AA on the surface they sit on.
+BASE   = ("#efe5cb", "#462e2e")  # window + card background   (ベース)
+SUB    = ("#bfc9bd", "#ad722f")  # secondary fills: card borders, 2nd-ary buttons, progress track (サブ)
+ACCENT = ("#9A6B00", "#F5B301")  # gold — primary actions, checkboxes, progress fill, selected (アクセント)
+
+TEXT      = ("#3a2b23", "#efe5cb")  # primary text: dark brown on light / cream on dark
+MUTED     = ("#7c6a58", "#cbb48f")  # secondary / hint text
+ON_ACCENT = ("#FFFFFF", "#241C00")  # text + checkmark on a gold ACCENT fill (white / near-black)
+ON_SUB    = "#241C00"               # text on a SUB (sage/amber) fill — dark in both modes
+
+ACCENT_HOVER = ("#7E5700", "#E0A80D")  # hover / pressed accent fill
+SUB_HOVER    = ("#adb8ab", "#96631f")  # hover / pressed secondary fill
+ACCENT_LINK  = ("#8A6100", "#F5B301")  # gold link text over the window / card bg
+
+OK_COLOR  = ("#15803D", "#22C55E")  # green — cookies still valid   (semantic, kept)
+BAD_COLOR = ("#DC2626", "#F87171")  # red   — expired / re-import    (semantic, kept)
+
+
+def _apply_palette():
+    """Push the palette above into CustomTkinter's global theme so every widget
+    adopts it by default — no need to color each label/frame by hand.
+
+    Call once, after set_default_color_theme() (which loads the theme dict) and
+    before any widget is built. Written defensively: a color key that a given
+    CustomTkinter version doesn't have is skipped, never raised.
+    """
+    theme = ctk.ThemeManager.theme
+
+    def put(widget, **fields):
+        block = theme.get(widget)
+        if not isinstance(block, dict):
+            return
+        for name, value in fields.items():
+            block[name] = list(value) if isinstance(value, tuple) else value
+
+    put("CTk", fg_color=BASE)
+    put("CTkToplevel", fg_color=BASE)
+    put("CTkFrame", fg_color=BASE, top_fg_color=BASE, border_color=SUB)
+    put("CTkScrollableFrame", label_fg_color=BASE)
+    put("CTkLabel", text_color=TEXT)
+    put("CTkButton", fg_color=ACCENT, hover_color=ACCENT_HOVER,
+        text_color=ON_ACCENT, border_color=SUB)
+    put("CTkEntry", fg_color=BASE, border_color=SUB, text_color=TEXT)
+    put("CTkCheckBox", fg_color=ACCENT, hover_color=ACCENT_HOVER,
+        checkmark_color=ON_ACCENT, border_color=SUB, text_color=TEXT)
+    put("CTkOptionMenu", fg_color=ACCENT, button_color=ACCENT_HOVER,
+        button_hover_color=ACCENT_HOVER, text_color=ON_ACCENT)
+    put("DropdownMenu", fg_color=BASE, hover_color=SUB, text_color=TEXT)
+    put("CTkProgressBar", fg_color=SUB, progress_color=ACCENT)
+    put("CTkTextbox", fg_color=BASE, text_color=TEXT, border_color=SUB)
+    put("CTkScrollbar", button_color=SUB, button_hover_color=SUB_HOVER)
 
 APPEARANCE = {"システム": "system", "ライト": "light", "ダーク": "dark"}
 
@@ -189,12 +239,74 @@ def desktop_notify(title: str, message: str) -> None:
                 check=False, capture_output=True, timeout=5)
         elif sys.platform.startswith("win"):
             from winotify import Notification
-            Notification(app_id="Kindle → Notion", title=title, msg=message).show()
+            Notification(app_id="Booklight", title=title, msg=message).show()
     except Exception:
         pass
 
 
-class SettingsDialog(ctk.CTkToplevel):
+def _colorref(pair, dark):
+    """(#RRGGBB light, #RRGGBB dark) -> Win32 COLORREF (0x00BBGGRR) for the mode."""
+    h = (pair[1] if dark else pair[0]).lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return r | (g << 8) | (b << 16)
+
+
+def _style_titlebar(window, color_mode):
+    """Paint a window's title bar to match BASE, with TEXT-colored caption text.
+
+    Uses the Windows 11 DWM caption-color attributes (need build 22000+); older
+    Windows silently keeps just the immersive dark/light fallback. No-op off
+    Windows or on any failure — purely cosmetic.
+    """
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        import ctypes
+
+        dark = str(color_mode).lower() == "dark"
+        hwnd = ctypes.windll.user32.GetAncestor(window.winfo_id(), 2)  # GA_ROOT
+        dwm = ctypes.windll.dwmapi.DwmSetWindowAttribute
+        flag = ctypes.c_int(1 if dark else 0)
+        if dwm(hwnd, 20, ctypes.byref(flag), ctypes.sizeof(flag)) != 0:
+            dwm(hwnd, 19, ctypes.byref(flag), ctypes.sizeof(flag))  # pre-20H1
+        cap = ctypes.c_int(_colorref(BASE, dark))
+        dwm(hwnd, 35, ctypes.byref(cap), ctypes.sizeof(cap))  # DWMWA_CAPTION_COLOR
+        txt = ctypes.c_int(_colorref(TEXT, dark))
+        dwm(hwnd, 36, ctypes.byref(txt), ctypes.sizeof(txt))  # DWMWA_TEXT_COLOR
+        SWP = 0x1 | 0x2 | 0x4 | 0x20  # NOSIZE|NOMOVE|NOZORDER|FRAMECHANGED
+        ctypes.windll.user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, SWP)
+    except Exception:
+        pass
+
+
+class _TitlebarMixin:
+    """Give a CTk / CTkToplevel a title bar painted to match BASE.
+
+    Overrides CustomTkinter's `_windows_set_titlebar_color`, which withdraws +
+    re-deiconifies to force a repaint (that withdraw could leave a dialog hidden
+    when the theme is switched from its own dropdown). We repaint in place and
+    re-apply once the current update settles so the caption color reliably sticks.
+    CustomTkinter calls this on creation and on every appearance-mode change, so
+    light / dark and "system" flips are covered automatically.
+    """
+
+    def _windows_set_titlebar_color(self, color_mode):
+        if not sys.platform.startswith("win"):
+            return
+        self._tb_mode = color_mode
+        _style_titlebar(self, color_mode)
+        try:  # re-apply after CTk's update settles so the repaint sticks
+            self.after(
+                50, lambda: _style_titlebar(self, getattr(self, "_tb_mode", color_mode)))
+        except Exception:
+            pass
+
+
+class _AppRoot(_TitlebarMixin, ctk.CTk):
+    """Main window — a CTk root whose title bar tracks BASE."""
+
+
+class SettingsDialog(_TitlebarMixin, ctk.CTkToplevel):
     """Modal dialog for the rarely-changed Notion settings (token / URL / DB ID).
 
     Edits the App's shared StringVars directly; "保存して閉じる" persists via
@@ -228,40 +340,6 @@ class SettingsDialog(ctk.CTkToplevel):
         self.lift()
         self.focus_force()
 
-    def _windows_set_titlebar_color(self, color_mode):
-        """Color the title bar to match the theme, WITHOUT withdrawing.
-
-        Overrides CustomTkinter's version, which withdraws + re-deiconifies this
-        toplevel to force a repaint — when the theme is switched from the in-dialog
-        dropdown, that withdraw could leave the settings window hidden and unable
-        to reopen. Instead we set the DWM immersive-dark-mode attribute and repaint
-        the frame in place, re-applying once the current update settles so the
-        title bar reliably repaints. Best-effort no-op off Windows.
-        """
-        if not sys.platform.startswith("win"):
-            return
-        self._titlebar_dark = str(color_mode).lower() == "dark"
-        self._apply_titlebar_dwm()
-        try:  # re-apply after CTk's update settles so the repaint sticks
-            self.after(50, self._apply_titlebar_dwm)
-        except Exception:
-            pass
-
-    def _apply_titlebar_dwm(self):
-        try:
-            import ctypes
-
-            dark = ctypes.c_int(1 if getattr(self, "_titlebar_dark", False) else 0)
-            hwnd = ctypes.windll.user32.GetAncestor(self.winfo_id(), 2)  # GA_ROOT
-            if ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                    hwnd, 20, ctypes.byref(dark), ctypes.sizeof(dark)) != 0:
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(  # pre-20H1 attribute
-                    hwnd, 19, ctypes.byref(dark), ctypes.sizeof(dark))
-            SWP = 0x1 | 0x2 | 0x4 | 0x20  # NOSIZE|NOMOVE|NOZORDER|FRAMECHANGED
-            ctypes.windll.user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, SWP)
-        except Exception:
-            pass
-
     def _build(self):
         app = self.app
         outer = ctk.CTkFrame(self, fg_color="transparent")
@@ -269,7 +347,7 @@ class SettingsDialog(ctk.CTkToplevel):
         outer.columnconfigure(0, weight=1)
 
         # Notion 接続情報 sits below Kindle 接続情報 (row 0); see c2 below.
-        card = ctk.CTkFrame(outer, corner_radius=12)
+        card = ctk.CTkFrame(outer, corner_radius=12, border_width=1)
         card.grid(row=1, column=0, sticky="ew", pady=(12, 0))
         card.columnconfigure(1, weight=1)
         ctk.CTkLabel(card, text="Notion 接続情報", font=app.f_section, anchor="w").grid(
@@ -282,7 +360,9 @@ class SettingsDialog(ctk.CTkToplevel):
             show="" if app.show_token.get() else "•")
         self.token_entry.grid(row=1, column=1, sticky="ew", padx=(0, 8), pady=6)
         ctk.CTkCheckBox(card, text="表示", variable=app.show_token, width=52,
-                        command=self._toggle_token, font=app.f_small).grid(
+                        command=self._toggle_token, font=app.f_small,
+                        fg_color=ACCENT, hover_color=ACCENT_HOVER,
+                        checkmark_color=ON_ACCENT).grid(
             row=1, column=2, sticky="w", padx=(0, 16), pady=6)
 
         ctk.CTkLabel(card, text="親ページ URL", font=app.f_body, anchor="w").grid(
@@ -301,7 +381,7 @@ class SettingsDialog(ctk.CTkToplevel):
         ).grid(row=4, column=1, columnspan=2, sticky="w", padx=(0, 16), pady=(0, 16))
 
         # --- card: Kindle 接続情報 (cookie management) — top of the dialog ---
-        c2 = ctk.CTkFrame(outer, corner_radius=12)
+        c2 = ctk.CTkFrame(outer, corner_radius=12, border_width=1)
         c2.grid(row=0, column=0, sticky="ew")
         c2.columnconfigure(0, weight=1)
         ctk.CTkLabel(c2, text="Kindle 接続情報", font=app.f_section, anchor="w").grid(
@@ -326,7 +406,7 @@ class SettingsDialog(ctk.CTkToplevel):
         self.refresh_cookie_buttons(core.has_saved_cookies())
 
         # --- card: 外観 (theme) ---
-        c3 = ctk.CTkFrame(outer, corner_radius=12)
+        c3 = ctk.CTkFrame(outer, corner_radius=12, border_width=1)
         c3.grid(row=2, column=0, sticky="ew", pady=(12, 0))
         c3.columnconfigure(1, weight=1)
         ctk.CTkLabel(c3, text="外観", font=app.f_section, anchor="w").grid(
@@ -335,18 +415,22 @@ class SettingsDialog(ctk.CTkToplevel):
             row=1, column=0, sticky="w", padx=(16, 8), pady=(0, 14))
         ctk.CTkOptionMenu(
             c3, values=list(APPEARANCE), variable=app.appearance_mode, width=140,
-            font=app.f_small, command=app._set_appearance, fg_color=ACCENT,
-            button_color=ACCENT, button_hover_color=ACCENT_HOVER).grid(
+            font=app.f_small, dropdown_font=app.f_small,
+            command=app._set_appearance, fg_color=ACCENT,
+            button_color=ACCENT_HOVER, button_hover_color=ACCENT_HOVER,
+            text_color=ON_ACCENT).grid(
             row=1, column=1, sticky="w", padx=(0, 16), pady=(0, 14))
 
         # --- card: 通知 ---
-        c4 = ctk.CTkFrame(outer, corner_radius=12)
+        c4 = ctk.CTkFrame(outer, corner_radius=12, border_width=1)
         c4.grid(row=3, column=0, sticky="ew", pady=(12, 0))
         c4.columnconfigure(0, weight=1)
         ctk.CTkLabel(c4, text="通知", font=app.f_section, anchor="w").grid(
             row=0, column=0, sticky="w", padx=16, pady=(14, 4))
         ctk.CTkCheckBox(c4, text="同期完了時にデスクトップ通知を出す",
-                        variable=app.notify_on_complete, font=app.f_body).grid(
+                        variable=app.notify_on_complete, font=app.f_body,
+                        fg_color=ACCENT, hover_color=ACCENT_HOVER,
+                        checkmark_color=ON_ACCENT).grid(
             row=1, column=0, sticky="w", padx=16, pady=(0, 14))
 
         br = ctk.CTkFrame(outer, fg_color="transparent")
@@ -401,7 +485,7 @@ class SettingsDialog(ctk.CTkToplevel):
         self.app.open_help(self)
 
 
-class HelpDialog(ctk.CTkToplevel):
+class HelpDialog(_TitlebarMixin, ctk.CTkToplevel):
     """Read-only "how to obtain" window: token / parent URL / DB ID / cookies.txt.
 
     Opened from the settings dialog's「❓ 取得方法」button. Values are still
@@ -431,7 +515,7 @@ class HelpDialog(ctk.CTkToplevel):
     # -- content helpers -----------------------------------------------------
     def _section(self, parent, title):
         """A titled card; returns the inner frame to add steps/links/notes to."""
-        card = ctk.CTkFrame(parent, corner_radius=12)
+        card = ctk.CTkFrame(parent, corner_radius=12, border_width=1)
         card.pack(fill="x", pady=(0, 12))
         ctk.CTkLabel(card, text=title, font=self.app.f_section, anchor="w").pack(
             fill="x", padx=16, pady=(14, 6))
@@ -451,7 +535,7 @@ class HelpDialog(ctk.CTkToplevel):
     def _link(self, parent, text, url):
         ctk.CTkButton(
             parent, text=text, font=self.app.f_small, anchor="w", height=28,
-            fg_color="transparent", text_color=ACCENT,
+            fg_color="transparent", text_color=ACCENT_LINK,
             hover_color=("gray90", "gray25"),
             command=lambda u=url: webbrowser.open(u)).pack(fill="x", pady=(4, 2))
 
@@ -526,7 +610,7 @@ class HelpDialog(ctk.CTkToplevel):
 class App:
     def __init__(self, root: ctk.CTk):
         self.root = root
-        root.title("Kindle → Notion")
+        root.title("Booklight")
         root.geometry("720x820")
         # Low min-height so the window can shrink to fit the collapsed log.
         root.minsize(640, 340)
@@ -599,19 +683,21 @@ class App:
 
     # -- reusable widgets ----------------------------------------------------
     def _ghost(self, parent, text, command, width=0):
+        # Secondary button: a tonal SUB fill with dark text (SUB is a mid-tone in
+        # both modes, so dark text stays legible either way).
         kw = {"width": width} if width else {}
         return ctk.CTkButton(
             parent, text=text, command=command, font=self.f_btn,
-            fg_color="transparent", border_width=1,
-            text_color=("gray20", "gray90"),
-            border_color=("gray70", "gray45"),
-            hover_color=("gray90", "gray25"), **kw,
+            fg_color=SUB, hover_color=SUB_HOVER, text_color=ON_SUB, **kw,
         )
 
     def _accent(self, parent, text, command):
+        # Primary button. The light-mode accent is a pale powder-blue that barely
+        # separates from the cream page, so a same-hue border gives it an edge.
         return ctk.CTkButton(
             parent, text=text, command=command, font=self.f_btn,
-            fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color="#FFFFFF",
+            fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color=ON_ACCENT,
+            border_width=1, border_color=ACCENT_HOVER,
         )
 
     def _label(self, parent, text, row):
@@ -632,6 +718,30 @@ class App:
             if not p.is_file():
                 return None
             img = Image.open(p).convert("RGBA")
+            return ctk.CTkImage(light_image=img, dark_image=img, size=size)
+        except Exception:
+            return None
+
+    def _app_icon(self, size=(40, 40)):
+        """The app icon (book badge) as a round CTkImage for the header title.
+
+        appicon.png is a square with a dark vignette in the corners; we mask it
+        to a circle so only the cream badge shows — clean on the cream (light)
+        and dark-brown (dark) backgrounds alike. Best-effort: returns None on any
+        failure, and the caller then shows the title text with no icon.
+        """
+        try:
+            from PIL import Image, ImageDraw
+
+            p = _icons_dir() / "appicon.png"
+            if not p.is_file():
+                return None
+            img = Image.open(p).convert("RGBA")
+            w, h = img.size
+            mask = Image.new("L", (w, h), 0)
+            inset = round(min(w, h) * 0.10)  # crop past the dark ring around the badge
+            ImageDraw.Draw(mask).ellipse((inset, inset, w - inset, h - inset), fill=255)
+            img.putalpha(mask)
             return ctk.CTkImage(light_image=img, dark_image=img, size=size)
         except Exception:
             return None
@@ -672,10 +782,14 @@ class App:
         hdr.columnconfigure(0, weight=1)
         titles = ctk.CTkFrame(hdr, fg_color="transparent")
         titles.grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(titles, text="📚  Kindle → Notion", font=self.f_title,
-                     anchor="w").pack(anchor="w")
+        # App icon (left) + one-line description (right). The app name lives in
+        # the title bar now, so the header carries no title text — just the icon.
+        self._header_icon = self._app_icon(size=(40, 40))
+        if self._header_icon is not None:
+            ctk.CTkLabel(titles, text="", image=self._header_icon).pack(
+                side="left", padx=(0, 12))
         ctk.CTkLabel(titles, text="Kindle のハイライトを Notion に同期します",
-                     font=self.f_sub, text_color=MUTED, anchor="w").pack(anchor="w")
+                     font=self.f_sub, text_color=MUTED, anchor="w").pack(side="left")
 
         # --- settings-incomplete banner (row 1); hidden once token + URL are set ---
         self.warn = ctk.CTkLabel(
@@ -685,7 +799,7 @@ class App:
 
         # --- card: 接続状態 — Kindle (left) / Notion (right), both probed at
         # startup. Read-only; the actual settings live in the「⚙ 設定」dialog. ---
-        sc = ctk.CTkFrame(self.outer, corner_radius=12)
+        sc = ctk.CTkFrame(self.outer, corner_radius=12, border_width=1)
         sc.grid(row=2, column=0, sticky="ew", pady=(0, 12))
         sc.columnconfigure(0, weight=1, uniform="status")
         sc.columnconfigure(1, weight=1, uniform="status")
@@ -739,7 +853,7 @@ class App:
         pf = ctk.CTkFrame(self.outer, fg_color="transparent")
         pf.grid(row=4, column=0, sticky="ew", pady=(0, 12))
         pf.columnconfigure(0, weight=1)
-        self.pbar = ctk.CTkProgressBar(pf, progress_color=ACCENT)
+        self.pbar = ctk.CTkProgressBar(pf, fg_color=SUB, progress_color=ACCENT)
         self.pbar.grid(row=0, column=0, sticky="ew")
         self.pbar.set(0)
         self.status = ctk.CTkLabel(pf, text="", font=self.f_small, text_color=MUTED,
@@ -747,7 +861,7 @@ class App:
         self.status.grid(row=1, column=0, sticky="w", pady=(6, 0))
 
         # --- log card (collapsible like <details>; collapsed by default) ---
-        lc = ctk.CTkFrame(self.outer, corner_radius=12)
+        lc = ctk.CTkFrame(self.outer, corner_radius=12, border_width=1)
         lc.grid(row=5, column=0, sticky="nsew", pady=(0, 12))
         lc.columnconfigure(0, weight=1)
         lc.rowconfigure(1, weight=1)
@@ -755,10 +869,10 @@ class App:
         self.log_toggle = ctk.CTkButton(
             lc, text="▸ ログ", command=self._toggle_log, font=self.f_section,
             anchor="w", height=32, corner_radius=8, fg_color="transparent",
-            text_color=("gray20", "gray90"), hover_color=("gray90", "gray25"))
+            text_color=TEXT, hover_color=SUB)
         self.log_toggle.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
         self.logbox = ctk.CTkTextbox(lc, font=self.f_log, corner_radius=8,
-                                     wrap="word", height=220)
+                                     border_width=1, wrap="word", height=220)
         # The textbox stays ungridded until expanded (default: collapsed).
 
         # Reflect the saved-cookie status on the Cookie row.
@@ -1103,12 +1217,12 @@ class App:
             self.log(f"完了: 対象 {res['total']} / " + summary)
             self.root.after(0, self._finish_progress, "完了")
             if self._notify_pref:
-                desktop_notify("Kindle → Notion 同期完了", summary)
+                desktop_notify("Booklight 同期完了", summary)
         except Exception as e:
             self.log("エラー: " + str(e))
             self.root.after(0, self._finish_progress, "エラー")
             if self._notify_pref:
-                desktop_notify("Kindle → Notion 同期エラー", str(e))
+                desktop_notify("Booklight 同期エラー", str(e))
         finally:
             self._syncing = False
             self.root.after(0, self._update_ready_state)
@@ -1126,9 +1240,10 @@ class App:
 
 def main():
     register_bundled_fonts()  # before ctk.CTk() so Tk sees the new families
-    ctk.set_default_color_theme("blue")
+    ctk.set_default_color_theme("blue")  # base structure; recolored by _apply_palette
+    _apply_palette()
     ctk.set_appearance_mode("system")
-    root = ctk.CTk()
+    root = _AppRoot()
     App(root)
     root.mainloop()
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import sys
@@ -76,9 +77,17 @@ def load_config() -> dict:
 
 
 def save_config(cfg: dict) -> None:
-    get_config_path().write_text(
-        json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    """Write config.json atomically: a crash never leaves a half-written file.
+
+    Write to a temp file in the same directory, then os.replace() it over the
+    target — the rename is atomic, so config.json is always either the old
+    complete file or the new complete file, never truncated JSON.
+    """
+    p = get_config_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, p)
 
 
 # ---------------------------------------------------------------- saved cookies
@@ -473,9 +482,16 @@ def build_rows(books: list, today: str) -> list:
     return rows
 
 
-def notion_sync(token, parent_page_id, database_id, books, today, log=print, progress=None) -> dict:
+def notion_sync(token, parent_page_id, database_id, books, today, log=print,
+                progress=None, on_database=None) -> dict:
     """Push highlights to Notion. Returns a result dict incl. the database_id
-    used/created, so the caller can persist it."""
+    used/created, so the caller can persist it.
+
+    on_database(db_id) is called as soon as a new database is created — before
+    any highlights are inserted — so the caller can persist the id immediately.
+    That way an interrupted first sync resumes into the same database instead of
+    creating a duplicate on the next run.
+    """
     db_id = normalize_id(database_id or "")
     if not db_id:
         parent = normalize_id(parent_page_id or "")
@@ -485,6 +501,8 @@ def notion_sync(token, parent_page_id, database_id, books, today, log=print, pro
         db = create_database(token, parent)
         db_id = db["id"]
         log("作成: " + (db.get("url") or db_id))
+        if on_database:
+            on_database(db_id)
 
     ensure_schema(token, db_id)
     existing = query_existing_keys(token, db_id)
@@ -537,6 +555,16 @@ def run_sync(cfg: dict, cookies_file=None, limit=None, log=print, progress=None)
     books = fetch_kindle(session, limit, log, progress)
     if not books:
         raise RuntimeError("本が0冊でした。ログイン状態を確認してください。")
+
+    had_db = bool((cfg.get("notion_database_id") or "").strip())
+
+    def _persist_new_db(db_id):
+        # Persist a freshly created database id right away (before inserts) so an
+        # interrupted first sync resumes into it rather than making a duplicate.
+        if not had_db:
+            cfg["notion_database_id"] = db_id
+            save_config(cfg)
+
     res = notion_sync(
         cfg["notion_token"],
         cfg.get("notion_parent_page_id"),
@@ -545,10 +573,8 @@ def run_sync(cfg: dict, cookies_file=None, limit=None, log=print, progress=None)
         date.today().isoformat(),
         log,
         progress,
+        on_database=_persist_new_db,
     )
-    if not (cfg.get("notion_database_id") or "").strip():
-        cfg["notion_database_id"] = res["database_id"]
-        save_config(cfg)
     return res
 
 

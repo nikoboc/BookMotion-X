@@ -297,6 +297,7 @@ class App:
         root.minsize(640, 700)
         cfg = core.load_config()
         self._indeterminate = False
+        self._syncing = False
 
         self.token = tk.StringVar(value=cfg.get("notion_token", ""))
         self.parent = tk.StringVar(value=cfg.get("notion_parent_page_id", ""))
@@ -326,6 +327,8 @@ class App:
 
         self._setup_fonts()
         self._build()
+        # Guard against quitting mid-sync (accidental close).
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # -- fonts ---------------------------------------------------------------
     def _setup_fonts(self):
@@ -638,6 +641,7 @@ class App:
             self._update_ready_state()  # re-assert the banner / disabled button
             return
         self.save()
+        self._syncing = True
         self.sync_btn.configure(state="disabled")
         self._reset_progress()
         threading.Thread(target=self._run, daemon=True).start()
@@ -662,7 +666,18 @@ class App:
             self.log("エラー: " + str(e))
             self.root.after(0, self._finish_progress, "エラー")
         finally:
+            self._syncing = False
             self.root.after(0, self._update_ready_state)
+
+    def _on_close(self):
+        """Confirm before quitting mid-sync; a normal close just exits."""
+        if self._syncing:
+            if not messagebox.askyesno(
+                "同期中",
+                "同期を実行中です。中断して終了しますか？\n"
+                "（登録済みの分は残り、次回の実行で続きから再開できます）"):
+                return
+        self.root.destroy()
 
 
 def main():

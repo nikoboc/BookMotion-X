@@ -132,6 +132,25 @@ def _resolve_fonts(root):
     return reg, reg
 
 
+def _resolve_mono(root):
+    """Monospace family for the token / URL / DB-ID fields.
+
+    Prefer the bundled Noto Sans Mono (registered at startup) so those fields
+    read identically on Windows and macOS; otherwise fall back to a per-OS
+    monospace, then Tk's built-in fixed font.
+    """
+    fams = set(tkfont.families(root))
+    if "Noto Sans Mono" in fams:
+        return "Noto Sans Mono"
+    for f in ("Consolas", "SF Mono", "Menlo", "DejaVu Sans Mono", "Courier New"):
+        if f in fams:
+            return f
+    try:
+        return tkfont.nametofont("TkFixedFont").actual("family")
+    except Exception:
+        return "Courier"
+
+
 class App:
     def __init__(self, root: ctk.CTk):
         self.root = root
@@ -168,6 +187,8 @@ class App:
         self.f_body = ctk.CTkFont(family=reg, size=13)
         self.f_small = ctk.CTkFont(family=reg, size=12)
         self.f_log = ctk.CTkFont(family=reg, size=12)
+        # Monospace for token / URL / DB-ID — easier to read IDs and spot typos.
+        self.f_mono = ctk.CTkFont(family=_resolve_mono(self.root), size=13)
         # Prefer a true Medium face for headings/buttons; else fall back to bold.
         self.f_section = (ctk.CTkFont(family=med, size=14) if med != reg
                           else ctk.CTkFont(family=reg, size=14, weight="bold"))
@@ -231,18 +252,18 @@ class App:
         c1 = self._card(1, "Notion 接続")
         self._label(c1, "Notion トークン", 1)
         self.token_entry = ctk.CTkEntry(c1, textvariable=self.token, show="•",
-                                        font=self.f_body)
+                                        font=self.f_mono)
         self.token_entry.grid(row=1, column=1, sticky="ew", padx=(0, 8), pady=6)
         ctk.CTkCheckBox(c1, text="表示", variable=self.show_token, width=52,
                         command=self._toggle_token, font=self.f_small).grid(
             row=1, column=2, sticky="w", padx=(0, 16), pady=6)
 
         self._label(c1, "親ページ URL", 2)
-        ctk.CTkEntry(c1, textvariable=self.parent, font=self.f_body).grid(
+        ctk.CTkEntry(c1, textvariable=self.parent, font=self.f_mono).grid(
             row=2, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=6)
 
         self._label(c1, "DB ID（任意）", 3)
-        ctk.CTkEntry(c1, textvariable=self.dbid, font=self.f_body).grid(
+        ctk.CTkEntry(c1, textvariable=self.dbid, font=self.f_mono).grid(
             row=3, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=(6, 2))
         ctk.CTkLabel(
             c1, font=self.f_small, text_color=MUTED, anchor="w", justify="left",

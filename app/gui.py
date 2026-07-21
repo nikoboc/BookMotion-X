@@ -44,6 +44,19 @@ def _fonts_dir() -> Path:
     return Path(__file__).resolve().parent / "fonts"
 
 
+def _icons_dir() -> Path:
+    """Directory holding the bundled brand logos (kindle.png / notion.png).
+
+    Same frozen/dev resolution as _fonts_dir: PyInstaller drops them under
+    sys._MEIPASS/icons (see the build scripts' `--add-data ...:icons`); in dev
+    they sit in app/icons/ next to this script.
+    """
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+        return base / "icons"
+    return Path(__file__).resolve().parent / "icons"
+
+
 def _register_font_file(path: str) -> bool:
     """Load one font file into THIS process only (no system-wide install).
 
@@ -362,6 +375,7 @@ class SettingsDialog(ctk.CTkToplevel):
         # The only place settings are persisted.
         self.app.save()
         self.app._update_ready_state()
+        self.app._check_notion()  # refresh the main-window Notion status
         self._teardown()
 
     def _close(self):
@@ -516,6 +530,7 @@ class App:
         root.geometry("720x820")
         # Low min-height so the window can shrink to fit the collapsed log.
         root.minsize(640, 340)
+        self._set_window_icon()
         cfg = core.load_config()
         self._indeterminate = False
         self._syncing = False
@@ -537,6 +552,11 @@ class App:
         ctk.set_appearance_mode(APPEARANCE[saved_theme])
         self.cookies_status = tk.StringVar(value="")
         self.cookies_valid = tk.StringVar(value="")
+        # Notion connection status, shown on the right of the main window and
+        # probed at startup like the cookies (left side).
+        self.notion_setup = tk.StringVar(value="")
+        self.notion_valid = tk.StringVar(value="")
+        self._notion_valid_lbl = None
         self._settings_win = None
         self._help_win = None
         # Cookie validity is shown on the main screen AND (when open) the settings
@@ -578,15 +598,6 @@ class App:
                       else ctk.CTkFont(family=reg, size=13, weight="bold"))
 
     # -- reusable widgets ----------------------------------------------------
-    def _card(self, row, title, expand=False):
-        card = ctk.CTkFrame(self.outer, corner_radius=12)
-        card.grid(row=row, column=0, sticky="nsew" if expand else "ew", pady=(0, 12))
-        card.columnconfigure(0, weight=1)
-        card.columnconfigure(1, weight=1)
-        ctk.CTkLabel(card, text=title, font=self.f_section, anchor="w").grid(
-            row=0, column=0, columnspan=3, sticky="w", padx=16, pady=(14, 4))
-        return card
-
     def _ghost(self, parent, text, command, width=0):
         kw = {"width": width} if width else {}
         return ctk.CTkButton(
@@ -606,6 +617,46 @@ class App:
     def _label(self, parent, text, row):
         ctk.CTkLabel(parent, text=text, font=self.f_body, anchor="w").grid(
             row=row, column=0, sticky="w", padx=(16, 8), pady=6)
+
+    def _brand_icon(self, filename, size=(22, 22)):
+        """Load a bundled brand logo (Kindle / Notion) as a CTkImage, or None.
+
+        Best-effort like the fonts: a missing file or load error just returns
+        None and the caller falls back to an emoji heading. The same raster
+        serves both themes — each logo carries its own background.
+        """
+        try:
+            from PIL import Image
+
+            p = _icons_dir() / filename
+            if not p.is_file():
+                return None
+            img = Image.open(p).convert("RGBA")
+            return ctk.CTkImage(light_image=img, dark_image=img, size=size)
+        except Exception:
+            return None
+
+    def _set_window_icon(self):
+        """Best-effort: show the app icon in the title bar / taskbar at runtime.
+
+        The packaged exe/.app already carries the icon via PyInstaller --icon;
+        this makes the running *window* match too (notably when run from source).
+        Windows uses the .ico via iconbitmap (also styles child dialogs); other
+        platforms fall back to a PhotoImage. Any failure is a silent no-op.
+        """
+        d = _icons_dir()
+        try:
+            if sys.platform.startswith("win"):
+                ico = d / "appicon.ico"
+                if ico.is_file():
+                    self.root.iconbitmap(default=str(ico))
+                    return
+            png = d / "appicon.png"
+            if png.is_file():
+                self._win_icon = tk.PhotoImage(file=str(png))
+                self.root.iconphoto(True, self._win_icon)
+        except Exception:
+            pass
 
     def _build(self):
         self.outer = ctk.CTkFrame(self.root, fg_color="transparent")
@@ -632,18 +683,47 @@ class App:
             text="⚠ トークンと親ページ URL が未設定です。「⚙ 設定」から入力してください。")
         self.warn.grid(row=1, column=0, sticky="w", pady=(0, 10))
 
-        # --- card: Kindle 接続情報 (read-only status;管理は「⚙ 設定」ダイアログで) ---
-        c2 = self._card(2, "Kindle 接続情報")
-        cf = ctk.CTkFrame(c2, fg_color="transparent")
-        cf.grid(row=1, column=0, columnspan=3, sticky="ew", padx=16, pady=(0, 14))
-        cf.columnconfigure(0, weight=1)
-        ctk.CTkLabel(cf, textvariable=self.cookies_status, font=self.f_small,
-                     text_color=MUTED, anchor="w").grid(row=0, column=0, sticky="w")
-        # Colored validity line — updated by the startup probe and manual checks.
-        lbl = ctk.CTkLabel(cf, textvariable=self.cookies_valid, font=self.f_small,
-                           text_color=MUTED, anchor="w")
-        lbl.grid(row=1, column=0, sticky="w", pady=(4, 0))
-        self._register_validity_label(lbl)
+        # --- card: 接続状態 — Kindle (left) / Notion (right), both probed at
+        # startup. Read-only; the actual settings live in the「⚙ 設定」dialog. ---
+        sc = ctk.CTkFrame(self.outer, corner_radius=12)
+        sc.grid(row=2, column=0, sticky="ew", pady=(0, 12))
+        sc.columnconfigure(0, weight=1, uniform="status")
+        sc.columnconfigure(1, weight=1, uniform="status")
+
+        # Real brand logos (fall back to an emoji if the files are missing).
+        self._icon_kindle = self._brand_icon("kindle.png")
+        self._icon_notion = self._brand_icon("notion.png")
+
+        # left: Kindle (cookie import + login validity)
+        kc = ctk.CTkFrame(sc, fg_color="transparent")
+        kc.grid(row=0, column=0, sticky="nsew", padx=(16, 8), pady=14)
+        ctk.CTkLabel(
+            kc, image=self._icon_kindle, compound="left",
+            text="  Kindle" if self._icon_kindle else "📚 Kindle",
+            font=self.f_section, anchor="w").pack(anchor="w")
+        ctk.CTkLabel(kc, textvariable=self.cookies_status, font=self.f_small,
+                     text_color=MUTED, anchor="w", justify="left",
+                     wraplength=280).pack(anchor="w", pady=(4, 0))
+        klbl = ctk.CTkLabel(kc, textvariable=self.cookies_valid, font=self.f_small,
+                            text_color=MUTED, anchor="w", justify="left",
+                            wraplength=280)
+        klbl.pack(anchor="w", pady=(2, 0))
+        self._register_validity_label(klbl)
+
+        # right: Notion (token presence + connection validity)
+        nc = ctk.CTkFrame(sc, fg_color="transparent")
+        nc.grid(row=0, column=1, sticky="nsew", padx=(8, 16), pady=14)
+        ctk.CTkLabel(
+            nc, image=self._icon_notion, compound="left",
+            text="  Notion" if self._icon_notion else "🔗 Notion",
+            font=self.f_section, anchor="w").pack(anchor="w")
+        ctk.CTkLabel(nc, textvariable=self.notion_setup, font=self.f_small,
+                     text_color=MUTED, anchor="w", justify="left",
+                     wraplength=280).pack(anchor="w", pady=(4, 0))
+        self._notion_valid_lbl = ctk.CTkLabel(
+            nc, textvariable=self.notion_valid, font=self.f_small,
+            text_color=MUTED, anchor="w", justify="left", wraplength=280)
+        self._notion_valid_lbl.pack(anchor="w", pady=(2, 0))
 
         # --- action row ---
         ar = ctk.CTkFrame(self.outer, fg_color="transparent")
@@ -687,6 +767,10 @@ class App:
         # startup (in the background) if we have saved cookies.
         if core.has_saved_cookies():
             self.root.after(400, lambda: self._check_cookies(silent=True))
+        # Same for Notion: show the token's presence immediately, then probe it.
+        self.notion_setup.set("アカウント情報設定済み" if self.token.get().strip()
+                              else "アカウント情報未設定")
+        self.root.after(400, self._check_notion)
 
         # Gate the sync button on the required settings (token + parent URL),
         # live as they change in the settings dialog.
@@ -713,11 +797,10 @@ class App:
     def _refresh_cookie_status(self):
         """Show whether cookies are saved; refresh the dialog buttons if it's open."""
         saved = core.has_saved_cookies()
-        n = core.saved_cookies_count()
         if saved:
-            self.cookies_status.set(f"取り込み済み（{n} 件）" if n else "取り込み済み")
+            self.cookies_status.set("アカウント情報設定済み")
         else:
-            self.cookies_status.set("未取り込み")
+            self.cookies_status.set("アカウント情報未設定")
             self._set_validity("", MUTED)  # no cookies → nothing to validate
         win = self._settings_win
         if win is not None and win.winfo_exists():
@@ -760,7 +843,7 @@ class App:
         try:
             ok = core.check_cookies(str(core.get_cookies_path()), log=lambda *_: None)
             if ok:
-                self.root.after(0, self._set_validity, "✓ ログイン有効", OK_COLOR)
+                self.root.after(0, self._set_validity, "✓ 接続OK", OK_COLOR)
             else:
                 self.root.after(
                     0, self._set_validity,
@@ -772,6 +855,45 @@ class App:
                 "接続を確認できませんでした（ネットワーク未接続など）", MUTED)
         finally:
             self.root.after(0, self._set_check_btn_state, "normal")
+
+    # -- notion status / validity -------------------------------------------
+    def _set_notion_validity(self, text, color):
+        """Update the Notion status line and recolor it (main window, right side)."""
+        self.notion_valid.set(text)
+        try:
+            self._notion_valid_lbl.configure(text_color=color)
+        except Exception:
+            pass
+
+    def _check_notion(self):
+        """Probe Notion to see whether the saved token is valid.
+
+        Called at startup and after saving settings. Mirrors _check_cookies:
+        the network call runs on a worker thread; results hop back to the UI.
+        With no token there is nothing to probe, so just show 未設定.
+        """
+        token = self.token.get().strip()
+        self.notion_setup.set("アカウント情報設定済み" if token else "アカウント情報未設定")
+        if not token:
+            self._set_notion_validity("", MUTED)
+            return
+        self._set_notion_validity("確認中…", MUTED)
+        threading.Thread(
+            target=self._run_notion_check, args=(token,), daemon=True).start()
+
+    def _run_notion_check(self, token):
+        try:
+            ok = core.check_notion(token)
+            if ok:
+                self.root.after(0, self._set_notion_validity, "✓ 接続OK", OK_COLOR)
+            else:
+                self.root.after(
+                    0, self._set_notion_validity,
+                    "✕ トークンが無効です — 設定で確認してください", BAD_COLOR)
+        except Exception:
+            self.root.after(
+                0, self._set_notion_validity,
+                "接続を確認できませんでした（ネットワーク未接続など）", MUTED)
 
     def _set_appearance(self, choice):
         self.appearance_mode.set(choice)

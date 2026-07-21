@@ -12,8 +12,10 @@ python3 -m venv .buildvenv || { echo "python3 が必要です (xcode-select --in
 echo "== .appをビルド中 (数分かかります) =="
 ./.buildvenv/bin/pyinstaller --noconfirm --windowed --name "KindleNotion" \
   --osx-bundle-identifier "com.local.kindlenotion" \
+  --icon "$APP/icons/appicon.icns" \
   --paths "$APP" \
   --add-data "$APP/fonts:fonts" \
+  --add-data "$APP/icons:icons" \
   --collect-all certifi \
   --collect-all customtkinter \
   --collect-all darkdetect \

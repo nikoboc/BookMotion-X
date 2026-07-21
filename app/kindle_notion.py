@@ -372,6 +372,26 @@ def notion_fetch(token: str, path: str, method: str, body=None):
     raise RuntimeError("Notion のレート制限で再試行上限に達しました。")
 
 
+def check_notion(token: str) -> bool:
+    """Lightweight auth probe: True if the Notion token is valid.
+
+    Calls GET /users/me, which any valid integration token can reach and an
+    invalid/empty one rejects with 401/403. Mirrors check_cookies: returns
+    False for a bad token, but re-raises other errors (network, 5xx) so callers
+    can tell "invalid token" apart from "couldn't reach Notion".
+    """
+    if not (token or "").strip():
+        return False
+    try:
+        notion_fetch(token.strip(), "/users/me", "GET")
+        return True
+    except RuntimeError as e:
+        m = str(e)
+        if "Notion 401" in m or "Notion 403" in m:
+            return False
+        raise
+
+
 def create_database(token: str, parent_page_id: str):
     # NOTE: Notion's API ignores property order on database creation — the UI
     # shows columns in an internal (arbitrary) order regardless of the order

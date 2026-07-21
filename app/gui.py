@@ -361,11 +361,13 @@ class App:
         self.root = root
         root.title("Kindle → Notion")
         root.geometry("720x820")
-        root.minsize(640, 700)
+        # Low min-height so the window can shrink to fit the collapsed log.
+        root.minsize(640, 340)
         cfg = core.load_config()
         self._indeterminate = False
         self._syncing = False
         self._notify_pref = True  # snapshot taken on the main thread at sync start
+        self._expanded_h = 820    # logical height to restore when the log expands
 
         self.token = tk.StringVar(value=cfg.get("notion_token", ""))
         self.parent = tk.StringVar(value=cfg.get("notion_parent_page_id", ""))
@@ -534,6 +536,9 @@ class App:
         self.parent.trace_add("write", self._update_ready_state)
         self._update_ready_state()
 
+        # Start compact: the log is collapsed, so fit the window to its content.
+        self._fit_height_to_content()
+
     # -- cookie status / validity -------------------------------------------
     def _register_validity_label(self, lbl):
         """Track a label that mirrors cookie validity, and color it to match."""
@@ -667,17 +672,38 @@ class App:
         self._refresh_cookie_status()
         self.log("保存済みの Cookie を削除しました。")
 
+    def _logical_wh(self):
+        """Current window (width, height) in logical px (geometry() is scaled back)."""
+        w, h = self.root.geometry().split("+")[0].split("x")
+        return int(w), int(h)
+
+    def _fit_height_to_content(self):
+        """Shrink the window to exactly fit its content (used when collapsed).
+
+        winfo_reqheight is in physical px; divide by the window scaling to get
+        the logical height CTk's geometry() expects (else it double-scales).
+        """
+        self.root.update_idletasks()
+        scaling = ctk.ScalingTracker.get_window_scaling(self.root)
+        h = round(self.root.winfo_reqheight() / scaling)
+        w, _ = self._logical_wh()
+        self.root.geometry(f"{w}x{h}")
+
     def _toggle_log(self):
-        """Expand/collapse the log area (like a <details> element)."""
+        """Expand/collapse the log; the window height follows (accordion)."""
         self._log_open = not self._log_open
         if self._log_open:
             self.logbox.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 16))
             self.log_toggle.configure(text="▾ ログ")
             self.outer.rowconfigure(5, weight=1)  # fill remaining space
+            w, _ = self._logical_wh()
+            self.root.geometry(f"{w}x{self._expanded_h}")  # restore expanded height
         else:
+            self._expanded_h = self._logical_wh()[1]  # remember it for next expand
             self.logbox.grid_remove()
             self.log_toggle.configure(text="▸ ログ")
             self.outer.rowconfigure(5, weight=0)  # shrink to just the header
+            self._fit_height_to_content()
 
     def log(self, msg):
         self.root.after(0, self._append, str(msg))

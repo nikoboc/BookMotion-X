@@ -151,6 +151,130 @@ def _resolve_mono(root):
         return "Courier"
 
 
+class SettingsDialog(ctk.CTkToplevel):
+    """Modal dialog for the rarely-changed Notion settings (token / URL / DB ID).
+
+    Edits the App's shared StringVars directly; "保存して閉じる" persists via
+    App.save() and re-evaluates the main window's ready state.
+    """
+
+    def __init__(self, app):
+        super().__init__(app.root)
+        self.app = app
+        self.title("設定")
+        self.geometry("560x600")
+        self.minsize(480, 520)
+        self.transient(app.root)
+        self.protocol("WM_DELETE_WINDOW", self._close)
+        self._build()
+        self.after(10, self._grab)  # grab once the window is viewable
+
+    def _grab(self):
+        try:
+            self.grab_set()
+        except Exception:
+            pass
+        self.lift()
+        self.focus_force()
+
+    def _build(self):
+        app = self.app
+        outer = ctk.CTkFrame(self, fg_color="transparent")
+        outer.pack(fill="both", expand=True, padx=20, pady=18)
+        outer.columnconfigure(0, weight=1)
+
+        card = ctk.CTkFrame(outer, corner_radius=12)
+        card.grid(row=0, column=0, sticky="ew")
+        card.columnconfigure(1, weight=1)
+        ctk.CTkLabel(card, text="Notion 接続", font=app.f_section, anchor="w").grid(
+            row=0, column=0, columnspan=3, sticky="w", padx=16, pady=(14, 4))
+
+        ctk.CTkLabel(card, text="Notion トークン", font=app.f_body, anchor="w").grid(
+            row=1, column=0, sticky="w", padx=(16, 8), pady=6)
+        self.token_entry = ctk.CTkEntry(
+            card, textvariable=app.token, font=app.f_mono,
+            show="" if app.show_token.get() else "•")
+        self.token_entry.grid(row=1, column=1, sticky="ew", padx=(0, 8), pady=6)
+        ctk.CTkCheckBox(card, text="表示", variable=app.show_token, width=52,
+                        command=self._toggle_token, font=app.f_small).grid(
+            row=1, column=2, sticky="w", padx=(0, 16), pady=6)
+
+        ctk.CTkLabel(card, text="親ページ URL", font=app.f_body, anchor="w").grid(
+            row=2, column=0, sticky="w", padx=(16, 8), pady=6)
+        ctk.CTkEntry(card, textvariable=app.parent, font=app.f_mono).grid(
+            row=2, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=6)
+
+        ctk.CTkLabel(card, text="DB ID（任意）", font=app.f_body, anchor="w").grid(
+            row=3, column=0, sticky="w", padx=(16, 8), pady=6)
+        ctk.CTkEntry(card, textvariable=app.dbid, font=app.f_mono).grid(
+            row=3, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=(6, 2))
+        ctk.CTkLabel(
+            card, font=app.f_small, text_color=MUTED, anchor="w", justify="left",
+            wraplength=380,
+            text=("空欄のまま同期すると、新しいデータベースを自動作成します。\n"
+                  "既存の DB を使うには、その DB を Notion のブラウザで開き、URL "
+                  "「notion.so/…/xxxx?v=…」の xxxx（32 桁の英数字）を貼り付けてください。"),
+        ).grid(row=4, column=1, columnspan=2, sticky="w", padx=(0, 16), pady=(0, 16))
+
+        # --- card: 取得設定 (cookie management) ---
+        c2 = ctk.CTkFrame(outer, corner_radius=12)
+        c2.grid(row=1, column=0, sticky="ew", pady=(12, 0))
+        c2.columnconfigure(0, weight=1)
+        ctk.CTkLabel(c2, text="取得設定", font=app.f_section, anchor="w").grid(
+            row=0, column=0, sticky="w", padx=16, pady=(14, 4))
+        ctk.CTkLabel(c2, text="Cookie（cookies.txt）", font=app.f_body, anchor="w").grid(
+            row=1, column=0, sticky="w", padx=16, pady=(0, 4))
+        ff = ctk.CTkFrame(c2, fg_color="transparent")
+        ff.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 14))
+        ff.columnconfigure(0, weight=1)
+        ctk.CTkLabel(ff, textvariable=app.cookies_status, font=app.f_small,
+                     text_color=MUTED, anchor="w").grid(row=0, column=0, sticky="w")
+        self.cookies_check_btn = app._ghost(ff, "接続確認", app._check_cookies, width=88)
+        self.cookies_check_btn.grid(row=0, column=1, padx=(8, 0))
+        app._ghost(ff, "取り込み…", app._import_cookies, width=104).grid(
+            row=0, column=2, padx=(8, 0))
+        self.cookies_clear_btn = app._ghost(ff, "クリア", app._clear_cookies, width=72)
+        self.cookies_clear_btn.grid(row=0, column=3, padx=(8, 0))
+        self.valid_lbl = ctk.CTkLabel(ff, textvariable=app.cookies_valid,
+                                      font=app.f_small, text_color=MUTED, anchor="w")
+        self.valid_lbl.grid(row=1, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        app._register_validity_label(self.valid_lbl)
+        self.refresh_cookie_buttons(core.has_saved_cookies())
+
+        br = ctk.CTkFrame(outer, fg_color="transparent")
+        br.grid(row=2, column=0, sticky="ew", pady=(14, 0))
+        br.columnconfigure(0, weight=1)
+        save_btn = app._accent(br, "保存して閉じる", self._save_close)
+        save_btn.configure(height=38)
+        save_btn.grid(row=0, column=1, sticky="e")
+
+    def refresh_cookie_buttons(self, saved):
+        """Enable Clear / 接続確認 only when cookies are actually saved."""
+        st = "normal" if saved else "disabled"
+        for b in (self.cookies_clear_btn, self.cookies_check_btn):
+            try:
+                b.configure(state=st)
+            except Exception:
+                pass
+
+    def _toggle_token(self):
+        self.token_entry.configure(show="" if self.app.show_token.get() else "•")
+
+    def _save_close(self):
+        self.app.save()
+        self.app._update_ready_state()
+        self._close()
+
+    def _close(self):
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        self.app._unregister_validity_label(self.valid_lbl)
+        self.app._settings_win = None
+        self.destroy()
+
+
 class App:
     def __init__(self, root: ctk.CTk):
         self.root = root
@@ -165,6 +289,13 @@ class App:
         self.dbid = tk.StringVar(value=cfg.get("notion_database_id", ""))
         self.cookies_status = tk.StringVar(value="")
         self.cookies_valid = tk.StringVar(value="")
+        self._settings_win = None
+        # Cookie validity is shown on the main screen AND (when open) the settings
+        # dialog; both labels share the StringVars, and _set_validity recolors every
+        # registered label. _validity_color remembers the latest color for labels
+        # that register later (e.g. the dialog's).
+        self._validity_labels = []
+        self._validity_color = MUTED
 
         # One-time migration: adopt a previously-referenced cookies.txt into the
         # app data dir so upgrading users keep working without re-importing.
@@ -248,60 +379,31 @@ class App:
         self.appearance.set("システム")
         self.appearance.grid(row=0, column=1, sticky="e")
 
-        # --- card: Notion 接続 ---
-        c1 = self._card(1, "Notion 接続")
-        self._label(c1, "Notion トークン", 1)
-        self.token_entry = ctk.CTkEntry(c1, textvariable=self.token, show="•",
-                                        font=self.f_mono)
-        self.token_entry.grid(row=1, column=1, sticky="ew", padx=(0, 8), pady=6)
-        ctk.CTkCheckBox(c1, text="表示", variable=self.show_token, width=52,
-                        command=self._toggle_token, font=self.f_small).grid(
-            row=1, column=2, sticky="w", padx=(0, 16), pady=6)
+        # --- settings-incomplete banner (row 1); hidden once token + URL are set ---
+        self.warn = ctk.CTkLabel(
+            self.outer, font=self.f_small, text_color=BAD_COLOR, anchor="w",
+            text="⚠ トークンと親ページ URL が未設定です。「⚙ 設定」から入力してください。")
+        self.warn.grid(row=1, column=0, sticky="w", pady=(0, 10))
 
-        self._label(c1, "親ページ URL", 2)
-        ctk.CTkEntry(c1, textvariable=self.parent, font=self.f_mono).grid(
-            row=2, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=6)
-
-        self._label(c1, "DB ID（任意）", 3)
-        ctk.CTkEntry(c1, textvariable=self.dbid, font=self.f_mono).grid(
-            row=3, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=(6, 2))
-        ctk.CTkLabel(
-            c1, font=self.f_small, text_color=MUTED, anchor="w", justify="left",
-            wraplength=430,
-            text=("空欄のまま同期すると、新しいデータベースを自動作成します。\n"
-                  "既存の DB を使うには、その DB を Notion のブラウザで開き、URL "
-                  "「notion.so/…/xxxx?v=…」の xxxx（32 桁の英数字）を貼り付けてください。"),
-        ).grid(row=4, column=1, columnspan=2, sticky="w", padx=(0, 16), pady=(0, 16))
-
-        # --- card: 取得設定 ---
-        c2 = self._card(2, "取得設定")
-        self._label(c2, "Cookie（cookies.txt）", 1)
-        ff = ctk.CTkFrame(c2, fg_color="transparent")
-        ff.grid(row=1, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=(6, 16))
-        ff.columnconfigure(0, weight=1)
-        self.cookies_status_lbl = ctk.CTkLabel(
-            ff, textvariable=self.cookies_status, font=self.f_small,
-            text_color=MUTED, anchor="w")
-        self.cookies_status_lbl.grid(row=0, column=0, sticky="w")
-        self.cookies_check_btn = self._ghost(
-            ff, "接続確認", self._check_cookies, width=88)
-        self.cookies_check_btn.grid(row=0, column=1, padx=(8, 0))
-        self.cookies_btn = self._ghost(ff, "取り込み…", self._import_cookies, width=104)
-        self.cookies_btn.grid(row=0, column=2, padx=(8, 0))
-        self.cookies_clear_btn = self._ghost(ff, "クリア", self._clear_cookies, width=72)
-        self.cookies_clear_btn.grid(row=0, column=3, padx=(8, 0))
-        # Second line: cookie validity (colored). Empty until checked.
-        self.cookies_valid_lbl = ctk.CTkLabel(
-            ff, textvariable=self.cookies_valid, font=self.f_small,
-            text_color=MUTED, anchor="w")
-        self.cookies_valid_lbl.grid(row=1, column=0, columnspan=4, sticky="w",
-                                    pady=(6, 0))
+        # --- card: Cookie (read-only status;管理は「⚙ 設定」ダイアログで) ---
+        c2 = self._card(2, "Cookie")
+        cf = ctk.CTkFrame(c2, fg_color="transparent")
+        cf.grid(row=1, column=0, columnspan=3, sticky="ew", padx=16, pady=(0, 14))
+        cf.columnconfigure(0, weight=1)
+        ctk.CTkLabel(cf, textvariable=self.cookies_status, font=self.f_small,
+                     text_color=MUTED, anchor="w").grid(row=0, column=0, sticky="w")
+        # Colored validity line — updated by the startup probe and manual checks.
+        lbl = ctk.CTkLabel(cf, textvariable=self.cookies_valid, font=self.f_small,
+                           text_color=MUTED, anchor="w")
+        lbl.grid(row=1, column=0, sticky="w", pady=(4, 0))
+        self._register_validity_label(lbl)
 
         # --- action row ---
         ar = ctk.CTkFrame(self.outer, fg_color="transparent")
         ar.grid(row=3, column=0, sticky="ew", pady=(0, 12))
         ar.columnconfigure(1, weight=1)
-        self._ghost(ar, "保存", self.save, width=104).grid(row=0, column=0, sticky="w")
+        self._ghost(ar, "⚙ 設定", self.open_settings, width=120).grid(
+            row=0, column=0, sticky="w")
         self.sync_btn = self._accent(ar, "Notion へ同期", self.sync)
         self.sync_btn.configure(width=168, height=40)
         self.sync_btn.grid(row=0, column=2, sticky="e")
@@ -331,9 +433,27 @@ class App:
         if core.has_saved_cookies():
             self.root.after(400, lambda: self._check_cookies(silent=True))
 
-    # -- appearance ----------------------------------------------------------
+        # Gate the sync button on the required settings (token + parent URL),
+        # live as they change in the settings dialog.
+        self.token.trace_add("write", self._update_ready_state)
+        self.parent.trace_add("write", self._update_ready_state)
+        self._update_ready_state()
+
+    # -- cookie status / validity -------------------------------------------
+    def _register_validity_label(self, lbl):
+        """Track a label that mirrors cookie validity, and color it to match."""
+        self._validity_labels.append(lbl)
+        try:
+            lbl.configure(text_color=self._validity_color)
+        except Exception:
+            pass
+
+    def _unregister_validity_label(self, lbl):
+        if lbl in self._validity_labels:
+            self._validity_labels.remove(lbl)
+
     def _refresh_cookie_status(self):
-        """Show whether cookies are saved and enable Clear/Check only when they are."""
+        """Show whether cookies are saved; refresh the dialog buttons if it's open."""
         saved = core.has_saved_cookies()
         n = core.saved_cookies_count()
         if saved:
@@ -341,13 +461,28 @@ class App:
         else:
             self.cookies_status.set("未取り込み")
             self._set_validity("", MUTED)  # no cookies → nothing to validate
-        self.cookies_clear_btn.configure(state="normal" if saved else "disabled")
-        self.cookies_check_btn.configure(state="normal" if saved else "disabled")
+        win = self._settings_win
+        if win is not None and win.winfo_exists():
+            win.refresh_cookie_buttons(saved)
 
     def _set_validity(self, text, color):
-        """Update the colored validity line (runs on the UI thread)."""
+        """Update the shared validity text and recolor every registered label."""
         self.cookies_valid.set(text)
-        self.cookies_valid_lbl.configure(text_color=color)
+        self._validity_color = color
+        for lbl in list(self._validity_labels):
+            try:
+                lbl.configure(text_color=color)
+            except Exception:
+                self._validity_labels.remove(lbl)
+
+    def _set_check_btn_state(self, state):
+        """Toggle the dialog's 接続確認 button if the dialog is currently open."""
+        win = self._settings_win
+        if win is not None and win.winfo_exists():
+            try:
+                win.cookies_check_btn.configure(state=state)
+            except Exception:
+                pass
 
     def _check_cookies(self, silent=False):
         """Probe Amazon to see whether the saved cookies still log us in.
@@ -359,7 +494,7 @@ class App:
             if not silent:
                 messagebox.showinfo("接続確認", "先に cookies.txt を取り込んでください。")
             return
-        self.cookies_check_btn.configure(state="disabled")
+        self._set_check_btn_state("disabled")
         self._set_validity("確認中…", MUTED)
         threading.Thread(target=self._run_check, daemon=True).start()
 
@@ -371,21 +506,39 @@ class App:
             else:
                 self.root.after(
                     0, self._set_validity,
-                    "✕ 期限切れ — 「取り込み…」から新しい cookies.txt を入れ直してください",
+                    "✕ 期限切れ — 設定の「取り込み…」から新しい cookies.txt を入れ直してください",
                     BAD_COLOR)
         except Exception:
             self.root.after(
                 0, self._set_validity,
                 "接続を確認できませんでした（ネットワーク未接続など）", MUTED)
         finally:
-            self.root.after(
-                0, lambda: self.cookies_check_btn.configure(state="normal"))
+            self.root.after(0, self._set_check_btn_state, "normal")
 
     def _set_appearance(self, choice):
         ctk.set_appearance_mode(APPEARANCE.get(choice, "system"))
 
-    def _toggle_token(self):
-        self.token_entry.configure(show="" if self.show_token.get() else "•")
+    def _settings_ready(self) -> bool:
+        """Token and parent-page URL are the two required settings; DB ID is optional."""
+        return bool(self.token.get().strip()) and bool(self.parent.get().strip())
+
+    def _update_ready_state(self, *_):
+        """Enable sync only when required settings are present; else show a banner."""
+        if self._settings_ready():
+            self.warn.grid_remove()
+            self.sync_btn.configure(state="normal")
+        else:
+            self.warn.grid()
+            self.sync_btn.configure(state="disabled")
+
+    def open_settings(self):
+        """Open (or focus) the modal settings dialog."""
+        win = self._settings_win
+        if win is not None and win.winfo_exists():
+            win.lift()
+            win.focus_force()
+            return
+        self._settings_win = SettingsDialog(self)
 
     def _import_cookies(self):
         """Read a cookies.txt and store it as app data; the original is then unneeded."""
@@ -470,8 +623,8 @@ class App:
         self.log("設定を保存しました: " + str(core.get_config_path()))
 
     def sync(self):
-        if not self.token.get().strip():
-            messagebox.showerror("エラー", "Notion トークンを入力してください")
+        if not self._settings_ready():
+            self._update_ready_state()  # re-assert the banner / disabled button
             return
         self.save()
         self.sync_btn.configure(state="disabled")
@@ -498,7 +651,7 @@ class App:
             self.log("エラー: " + str(e))
             self.root.after(0, self._finish_progress, "エラー")
         finally:
-            self.root.after(0, lambda: self.sync_btn.configure(state="normal"))
+            self.root.after(0, self._update_ready_state)
 
 
 def main():

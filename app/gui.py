@@ -19,6 +19,8 @@ import kindle_notion as core
 ACCENT = "#4F46E5"
 ACCENT_HOVER = "#4338CA"
 MUTED = ("gray40", "gray65")  # (light, dark)
+OK_COLOR = ("#15803D", "#22C55E")     # green — cookies still valid (light, dark)
+BAD_COLOR = ("#DC2626", "#F87171")    # red — expired / needs re-import (light, dark)
 
 APPEARANCE = {"システム": "system", "ライト": "light", "ダーク": "dark"}
 
@@ -143,6 +145,7 @@ class App:
         self.parent = tk.StringVar(value=cfg.get("notion_parent_page_id", ""))
         self.dbid = tk.StringVar(value=cfg.get("notion_database_id", ""))
         self.cookies_status = tk.StringVar(value="")
+        self.cookies_valid = tk.StringVar(value="")
 
         # One-time migration: adopt a previously-referenced cookies.txt into the
         # app data dir so upgrading users keep working without re-importing.
@@ -252,10 +255,19 @@ class App:
             ff, textvariable=self.cookies_status, font=self.f_small,
             text_color=MUTED, anchor="w")
         self.cookies_status_lbl.grid(row=0, column=0, sticky="w")
+        self.cookies_check_btn = self._ghost(
+            ff, "接続確認", self._check_cookies, width=88)
+        self.cookies_check_btn.grid(row=0, column=1, padx=(8, 0))
         self.cookies_btn = self._ghost(ff, "取り込み…", self._import_cookies, width=104)
-        self.cookies_btn.grid(row=0, column=1, padx=(8, 0))
+        self.cookies_btn.grid(row=0, column=2, padx=(8, 0))
         self.cookies_clear_btn = self._ghost(ff, "クリア", self._clear_cookies, width=72)
-        self.cookies_clear_btn.grid(row=0, column=2, padx=(8, 0))
+        self.cookies_clear_btn.grid(row=0, column=3, padx=(8, 0))
+        # Second line: cookie validity (colored). Empty until checked.
+        self.cookies_valid_lbl = ctk.CTkLabel(
+            ff, textvariable=self.cookies_valid, font=self.f_small,
+            text_color=MUTED, anchor="w")
+        self.cookies_valid_lbl.grid(row=1, column=0, columnspan=4, sticky="w",
+                                    pady=(6, 0))
 
         # --- action row ---
         ar = ctk.CTkFrame(self.outer, fg_color="transparent")
@@ -286,17 +298,60 @@ class App:
 
         # Reflect the saved-cookie status on the Cookie row.
         self._refresh_cookie_status()
+        # Notice an expired cookie without waiting for a full sync: probe once at
+        # startup (in the background) if we have saved cookies.
+        if core.has_saved_cookies():
+            self.root.after(400, lambda: self._check_cookies(silent=True))
 
     # -- appearance ----------------------------------------------------------
     def _refresh_cookie_status(self):
-        """Show whether cookies are saved and enable Clear only when they are."""
+        """Show whether cookies are saved and enable Clear/Check only when they are."""
+        saved = core.has_saved_cookies()
         n = core.saved_cookies_count()
-        if core.has_saved_cookies():
+        if saved:
             self.cookies_status.set(f"取り込み済み（{n} 件）" if n else "取り込み済み")
         else:
             self.cookies_status.set("未取り込み")
-        self.cookies_clear_btn.configure(
-            state="normal" if core.has_saved_cookies() else "disabled")
+            self._set_validity("", MUTED)  # no cookies → nothing to validate
+        self.cookies_clear_btn.configure(state="normal" if saved else "disabled")
+        self.cookies_check_btn.configure(state="normal" if saved else "disabled")
+
+    def _set_validity(self, text, color):
+        """Update the colored validity line (runs on the UI thread)."""
+        self.cookies_valid.set(text)
+        self.cookies_valid_lbl.configure(text_color=color)
+
+    def _check_cookies(self, silent=False):
+        """Probe Amazon to see whether the saved cookies still log us in.
+
+        silent=True is used for the automatic startup check: it skips the
+        "import first" dialog so a fresh install stays quiet.
+        """
+        if not core.has_saved_cookies():
+            if not silent:
+                messagebox.showinfo("接続確認", "先に cookies.txt を取り込んでください。")
+            return
+        self.cookies_check_btn.configure(state="disabled")
+        self._set_validity("確認中…", MUTED)
+        threading.Thread(target=self._run_check, daemon=True).start()
+
+    def _run_check(self):
+        try:
+            ok = core.check_cookies(str(core.get_cookies_path()), log=lambda *_: None)
+            if ok:
+                self.root.after(0, self._set_validity, "✓ ログイン有効", OK_COLOR)
+            else:
+                self.root.after(
+                    0, self._set_validity,
+                    "✕ 期限切れ — 「取り込み…」から新しい cookies.txt を入れ直してください",
+                    BAD_COLOR)
+        except Exception:
+            self.root.after(
+                0, self._set_validity,
+                "接続を確認できませんでした（ネットワーク未接続など）", MUTED)
+        finally:
+            self.root.after(
+                0, lambda: self.cookies_check_btn.configure(state="normal"))
 
     def _set_appearance(self, choice):
         ctk.set_appearance_mode(APPEARANCE.get(choice, "system"))
@@ -321,6 +376,7 @@ class App:
         self._refresh_cookie_status()
         self.log(f"Cookie を取り込みました（{n} 件）。以後この元ファイルは不要です → "
                  f"{core.get_cookies_path()}")
+        self._check_cookies(silent=True)  # confirm the fresh cookies actually work
 
     def _clear_cookies(self):
         """Delete the app's saved cookies."""

@@ -147,6 +147,19 @@ def build_session(cookies_file, log=print) -> requests.Session:
     return s
 
 
+def check_cookies(cookies_file, log=print) -> bool:
+    """Lightweight auth probe: True if the saved cookies still log us in.
+
+    Fetches the notebook page and checks for a sign-in redirect — the same
+    signal fetch_all_books uses. Returns False when the cookies have expired or
+    been invalidated. Raises on network errors so callers can distinguish
+    "expired" (False) from "couldn't reach Amazon" (exception).
+    """
+    session = build_session(cookies_file, log=log)
+    r = session.get(NOTEBOOK, timeout=30)
+    return "signin" not in r.url and "/ap/" not in r.url
+
+
 # ---------------------------------------------------------------- parsing
 def parse_books(html: str) -> list:
     soup = BeautifulSoup(html, "html.parser")
@@ -259,8 +272,9 @@ def fetch_all_books(session: requests.Session) -> list:
     r = session.get(NOTEBOOK, timeout=30)
     if "signin" in r.url or "/ap/" in r.url:
         raise RuntimeError(
-            "ログインしていません。ブラウザで read.amazon.co.jp にログインして再実行"
-            "（または cookies.txt を指定）してください。"
+            "ログインしていません。Cookie の有効期限が切れた可能性があります。"
+            "ブラウザで read.amazon.co.jp にログインし直し、新しい cookies.txt を"
+            "書き出して「取り込み…」から入れ直してください。"
         )
     soup = BeautifulSoup(r.text, "html.parser")
     csrf_el = soup.select_one("input[name='anti-csrftoken-a2z']")

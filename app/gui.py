@@ -243,7 +243,14 @@ class App:
 
         self._label(c1, "DB ID（任意）", 3)
         ctk.CTkEntry(c1, textvariable=self.dbid, font=self.f_body).grid(
-            row=3, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=(6, 16))
+            row=3, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=(6, 2))
+        ctk.CTkLabel(
+            c1, font=self.f_small, text_color=MUTED, anchor="w", justify="left",
+            wraplength=430,
+            text=("空欄のまま同期すると、新しいデータベースを自動作成します。\n"
+                  "既存の DB を使うには、その DB を Notion のブラウザで開き、URL "
+                  "「notion.so/…/xxxx?v=…」の xxxx（32 桁の英数字）を貼り付けてください。"),
+        ).grid(row=4, column=1, columnspan=2, sticky="w", padx=(0, 16), pady=(0, 16))
 
         # --- card: 取得設定 ---
         c2 = self._card(2, "取得設定")

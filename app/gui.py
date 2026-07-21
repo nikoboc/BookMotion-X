@@ -7,6 +7,7 @@ editing. Values are saved to config.json (Application Support when packaged).
 import subprocess
 import sys
 import threading
+import webbrowser
 import tkinter as tk
 import tkinter.font as tkfont
 from pathlib import Path
@@ -24,6 +25,11 @@ OK_COLOR = ("#15803D", "#22C55E")     # green — cookies still valid (light, da
 BAD_COLOR = ("#DC2626", "#F87171")    # red — expired / needs re-import (light, dark)
 
 APPEARANCE = {"システム": "system", "ライト": "light", "ダーク": "dark"}
+
+# External help links opened from the help window (取得方法).
+NOTION_INTEGRATIONS_URL = "https://www.notion.so/my-integrations"
+AMAZON_NOTEBOOK_URL = "https://read.amazon.co.jp/notebook"
+COOKIES_EXT_SEARCH_URL = "https://chromewebstore.google.com/search/get%20cookies.txt"
 
 
 def _fonts_dir() -> Path:
@@ -185,6 +191,15 @@ class SettingsDialog(ctk.CTkToplevel):
     def __init__(self, app):
         super().__init__(app.root)
         self.app = app
+        # Snapshot the current (saved) values so cancel can discard edits and
+        # nothing persists until "保存して閉じる".
+        self._orig = {
+            "token": app.token.get(),
+            "parent": app.parent.get(),
+            "dbid": app.dbid.get(),
+            "notify": app.notify_on_complete.get(),
+            "appearance": app.appearance_mode.get(),
+        }
         self.title("設定")
         self.geometry("560x780")
         self.minsize(480, 660)
@@ -268,9 +283,7 @@ class SettingsDialog(ctk.CTkToplevel):
         ctk.CTkLabel(
             card, font=app.f_small, text_color=MUTED, anchor="w", justify="left",
             wraplength=380,
-            text=("空欄のまま同期すると、新しいデータベースを自動作成します。\n"
-                  "既存の DB を使うには、その DB を Notion のブラウザで開き、URL "
-                  "「notion.so/…/xxxx?v=…」の xxxx（32 桁の英数字）を貼り付けてください。"),
+            text="空欄のまま同期すると、新しいデータベースを自動作成します。",
         ).grid(row=4, column=1, columnspan=2, sticky="w", padx=(0, 16), pady=(0, 16))
 
         # --- card: 取得設定 (cookie management) ---
@@ -325,6 +338,9 @@ class SettingsDialog(ctk.CTkToplevel):
         br = ctk.CTkFrame(outer, fg_color="transparent")
         br.grid(row=4, column=0, sticky="ew", pady=(14, 0))
         br.columnconfigure(0, weight=1)
+        help_btn = app._ghost(br, "❓ 取得方法", self._open_help)
+        help_btn.configure(height=38)
+        help_btn.grid(row=0, column=0, sticky="w")
         save_btn = app._accent(br, "保存して閉じる", self._save_close)
         save_btn.configure(height=38)
         save_btn.grid(row=0, column=1, sticky="e")
@@ -342,14 +358,154 @@ class SettingsDialog(ctk.CTkToplevel):
         self.token_entry.configure(show="" if self.app.show_token.get() else "•")
 
     def _save_close(self):
+        # The only place settings are persisted.
         self.app.save()
         self.app._update_ready_state()
-        self._close()
+        self._teardown()
 
     def _close(self):
+        # Cancel (X / window close): discard unsaved edits by restoring the
+        # values captured when the dialog opened, including the live theme.
+        a, o = self.app, self._orig
+        a.token.set(o["token"])
+        a.parent.set(o["parent"])
+        a.dbid.set(o["dbid"])
+        a.notify_on_complete.set(o["notify"])
+        revert_theme = a.appearance_mode.get() != o["appearance"]
+        self._teardown()
+        if revert_theme:
+            # After teardown so only the main window recolors (the dialog is gone).
+            a._set_appearance(o["appearance"])
+
+    def _teardown(self):
         self.app._unregister_validity_label(self.valid_lbl)
         self.app._settings_win = None
         self.destroy()
+
+    def _open_help(self):
+        self.app.open_help(self)
+
+
+class HelpDialog(ctk.CTkToplevel):
+    """Read-only "how to obtain" window: token / parent URL / DB ID / cookies.txt.
+
+    Opened from the settings dialog's「❓ 取得方法」button. Values are still
+    entered in the settings dialog — this window only explains where each value
+    comes from and opens the relevant external pages in the default browser.
+    """
+
+    def __init__(self, app, parent=None):
+        super().__init__(parent or app.root)
+        self.app = app
+        self.title("取得方法 / ヘルプ")
+        self.geometry("620x720")
+        self.minsize(520, 480)
+        self.transient(parent or app.root)
+        self.protocol("WM_DELETE_WINDOW", self._close)
+        self._build()
+        self.after(10, self._raise_dialog)
+
+    def _raise_dialog(self):
+        self.lift()
+        self.focus_force()
+
+    def _close(self):
+        self.app._help_win = None
+        self.destroy()
+
+    # -- content helpers -----------------------------------------------------
+    def _section(self, parent, title):
+        """A titled card; returns the inner frame to add steps/links/notes to."""
+        card = ctk.CTkFrame(parent, corner_radius=12)
+        card.pack(fill="x", pady=(0, 12))
+        ctk.CTkLabel(card, text=title, font=self.app.f_section, anchor="w").pack(
+            fill="x", padx=16, pady=(14, 6))
+        body = ctk.CTkFrame(card, fg_color="transparent")
+        body.pack(fill="x", padx=16, pady=(0, 14))
+        return body
+
+    def _step(self, parent, text):
+        ctk.CTkLabel(parent, text=text, font=self.app.f_body, anchor="w",
+                     justify="left", wraplength=500).pack(fill="x", pady=3)
+
+    def _note(self, parent, text):
+        ctk.CTkLabel(parent, text=text, font=self.app.f_small, text_color=MUTED,
+                     anchor="w", justify="left", wraplength=500).pack(
+            fill="x", pady=(6, 0))
+
+    def _link(self, parent, text, url):
+        ctk.CTkButton(
+            parent, text=text, font=self.app.f_small, anchor="w", height=28,
+            fg_color="transparent", text_color=ACCENT,
+            hover_color=("gray90", "gray25"),
+            command=lambda u=url: webbrowser.open(u)).pack(fill="x", pady=(4, 2))
+
+    def _build(self):
+        app = self.app
+        wrap = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        wrap.pack(fill="both", expand=True, padx=16, pady=(16, 8))
+
+        ctk.CTkLabel(
+            wrap, font=app.f_small, text_color=MUTED, anchor="w", justify="left",
+            wraplength=500,
+            text=("同期には ① Notion トークン ② 親ページ URL ③（任意）DB ID "
+                  "④ cookies.txt が必要です。入力は「⚙ 設定」で行います。")).pack(
+            fill="x", pady=(0, 12))
+
+        # ① Notion トークン
+        b = self._section(wrap, "① Notion トークンの取得")
+        self._step(b, "1. 下のリンクから「マイインテグレーション」を開きます。")
+        self._link(b, "🔗 notion.so/my-integrations を開く", NOTION_INTEGRATIONS_URL)
+        self._step(b, "2. 「新しいインテグレーション」を作成します（種類は内部/Internal）。")
+        self._step(b, "3. 表示された「Internal Integration Token」（ntn_… または "
+                      "secret_… で始まる文字列）をコピーします。")
+        self._step(b, "4. 「⚙ 設定」の「Notion トークン」欄に貼り付けます。")
+        self._note(b, "⚠ トークンを作っただけでは書き込めません。②の親ページに、この "
+                      "インテグレーションを「連携」から追加してください（忘れると 404 エラー）。")
+
+        # ② 親ページ URL
+        b = self._section(wrap, "② 親ページ URL の取得と連携")
+        self._step(b, "1. データベースを置きたい Notion のページを開きます"
+                      "（新しい空ページを作ってもOK）。")
+        self._link(b, "🔗 Notion を開く", "https://www.notion.so")
+        self._step(b, "2. そのページの URL をコピーし、「⚙ 設定」の「親ページ URL」欄に"
+                      "貼り付けます。")
+        self._step(b, "3. ページ右上の「•••」→「連携（コネクト）」→ ①で作った"
+                      "インテグレーションを追加します。")
+        self._note(b, "この「連携」を忘れると、トークンが正しくても 404 で失敗します。")
+
+        # ③ データベース ID
+        b = self._section(wrap, "③ データベース ID（任意）")
+        self._step(b, "空欄のまま同期すると、新しいデータベースを自動作成します。"
+                      "通常は空欄でOKです。")
+        self._step(b, "既存のデータベースに追記したい場合のみ、その DB を Notion の"
+                      "ブラウザで開きます。")
+        self._step(b, "URL「notion.so/…/xxxxxxxx?v=…」の xxxxxxxx（32 桁の英数字）が "
+                      "DB ID です。これを「⚙ 設定」の「DB ID」欄に貼り付けます。")
+        self._note(b, "最後のスラッシュの後ろ・「?v=」より前が DB ID です"
+                      "（末尾のページ名部分は無視されます）。")
+
+        # ④ cookies.txt
+        b = self._section(wrap, "④ cookies.txt の取得")
+        self._step(b, "1. ブラウザで read.amazon.co.jp にログインしておきます。")
+        self._link(b, "🔗 read.amazon.co.jp/notebook を開く", AMAZON_NOTEBOOK_URL)
+        self._step(b, "2. Cookie 書き出し用の拡張機能を入れます"
+                      "（例:「Get cookies.txt LOCALLY」）。")
+        self._link(b, "🔗 Chrome ウェブストアで「get cookies.txt」を検索",
+                   COOKIES_EXT_SEARCH_URL)
+        self._step(b, "3. read.amazon.co.jp を開いた状態で拡張機能を起動し、cookies.txt "
+                      "をエクスポート（Export／Download）します。")
+        self._step(b, "4. 「⚙ 設定」の Cookie 欄「取り込み…」から、その cookies.txt を"
+                      "選びます。")
+        self._note(b, "取り込み後は元ファイル不要です。「✕ 期限切れ」と表示されたら、"
+                      "ログインし直して cookies.txt を取り直し、もう一度「取り込み…」して"
+                      "ください。")
+
+        br = ctk.CTkFrame(self, fg_color="transparent")
+        br.pack(fill="x", padx=16, pady=(0, 14))
+        close = app._accent(br, "閉じる", self._close)
+        close.configure(width=100, height=36)
+        close.pack(side="right")
 
 
 class App:
@@ -381,6 +537,7 @@ class App:
         self.cookies_status = tk.StringVar(value="")
         self.cookies_valid = tk.StringVar(value="")
         self._settings_win = None
+        self._help_win = None
         # Cookie validity is shown on the main screen AND (when open) the settings
         # dialog; both labels share the StringVars, and _set_validity recolors every
         # registered label. _validity_color remembers the latest color for labels
@@ -616,20 +773,11 @@ class App:
             self.root.after(0, self._set_check_btn_state, "normal")
 
     def _set_appearance(self, choice):
-        self.appearance_mode.set(choice)  # authoritative source for persistence
-        self._persist_appearance()  # so the choice survives a restart
-        # Safe to apply inline now: SettingsDialog overrides the title-bar recolor
-        # so switching the theme no longer withdraws the open dialog.
+        self.appearance_mode.set(choice)
+        # Live preview only — persisted on "保存して閉じる", reverted on cancel.
+        # SettingsDialog overrides the title-bar recolor so switching the theme
+        # no longer withdraws the open dialog.
         ctk.set_appearance_mode(APPEARANCE.get(choice, "system"))
-
-    def _persist_appearance(self):
-        """Save just the theme choice immediately (independent of unsaved edits)."""
-        try:
-            cfg = core.load_config()
-            cfg["appearance_mode"] = self.appearance_mode.get()
-            core.save_config(cfg)
-        except Exception:
-            pass
 
     def _settings_ready(self) -> bool:
         """Token and parent-page URL are the two required settings; DB ID is optional."""
@@ -664,6 +812,27 @@ class App:
                     pass
                 self._settings_win = None
         self._settings_win = SettingsDialog(self)
+
+    def open_help(self, parent=None):
+        """Open, or re-show and focus, the help window (取得方法).
+
+        Mirrors open_settings' self-healing: re-show a withdrawn window, and
+        recreate one left in a bad state.
+        """
+        win = self._help_win
+        if win is not None and win.winfo_exists():
+            try:
+                win.deiconify()
+                win.lift()
+                win.focus_force()
+                return
+            except Exception:
+                try:
+                    win.destroy()
+                except Exception:
+                    pass
+                self._help_win = None
+        self._help_win = HelpDialog(self, parent)
 
     def _import_cookies(self):
         """Read a cookies.txt and store it as app data; the original is then unneeded."""

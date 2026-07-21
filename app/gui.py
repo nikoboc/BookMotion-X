@@ -175,37 +175,6 @@ def desktop_notify(title: str, message: str) -> None:
         pass
 
 
-def _apply_titlebar_theme(win) -> None:
-    """Match a window's title bar to the current appearance (Windows only).
-
-    CTkToplevel sometimes leaves the title bar light in dark mode; set the DWM
-    immersive-dark-mode attribute explicitly and nudge the frame to repaint.
-    Best-effort no-op on other platforms or older Windows.
-    """
-    if not sys.platform.startswith("win"):
-        return
-    try:
-        import ctypes
-
-        use_dark = ctypes.c_int(1 if ctk.get_appearance_mode() == "Dark" else 0)
-        hwnd = ctypes.windll.user32.GetAncestor(win.winfo_id(), 2)  # GA_ROOT
-        DWMWA_USE_IMMERSIVE_DARK_MODE = 20  # 19 on pre-20H1 Windows 10
-        if ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
-                ctypes.byref(use_dark), ctypes.sizeof(use_dark)) != 0:
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd, 19, ctypes.byref(use_dark), ctypes.sizeof(use_dark))
-        # Force a non-client (title-bar) repaint WITHOUT resizing — a resize
-        # round-trip would double-apply CustomTkinter's DPI scaling and grow the
-        # window. SWP_FRAMECHANGED redraws the frame at the same size/position.
-        SWP_NOSIZE, SWP_NOMOVE, SWP_NOZORDER, SWP_FRAMECHANGED = 0x1, 0x2, 0x4, 0x20
-        ctypes.windll.user32.SetWindowPos(
-            hwnd, 0, 0, 0, 0, 0,
-            SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED)
-    except Exception:
-        pass
-
-
 class SettingsDialog(ctk.CTkToplevel):
     """Modal dialog for the rarely-changed Notion settings (token / URL / DB ID).
 
@@ -222,17 +191,48 @@ class SettingsDialog(ctk.CTkToplevel):
         self.transient(app.root)
         self.protocol("WM_DELETE_WINDOW", self._close)
         self._build()
-        self.after(10, self._grab)  # grab once the window is viewable
-        # Match the title bar to the theme, after CustomTkinter's own attempt.
-        self.after(120, lambda: _apply_titlebar_theme(self))
+        self.after(10, self._raise_dialog)  # bring to front once viewable
 
-    def _grab(self):
-        try:
-            self.grab_set()
-        except Exception:
-            pass
+    def _raise_dialog(self):
+        # NOTE: no grab_set() — a modal grab deadlocks with the CTkOptionMenu
+        # dropdown (tk_popup) on Windows and freezes the app. Keep it non-modal;
+        # `transient` still keeps it above the main window.
         self.lift()
         self.focus_force()
+
+    def _windows_set_titlebar_color(self, color_mode):
+        """Color the title bar to match the theme, WITHOUT withdrawing.
+
+        Overrides CustomTkinter's version, which withdraws + re-deiconifies this
+        toplevel to force a repaint — when the theme is switched from the in-dialog
+        dropdown, that withdraw could leave the settings window hidden and unable
+        to reopen. Instead we set the DWM immersive-dark-mode attribute and repaint
+        the frame in place, re-applying once the current update settles so the
+        title bar reliably repaints. Best-effort no-op off Windows.
+        """
+        if not sys.platform.startswith("win"):
+            return
+        self._titlebar_dark = str(color_mode).lower() == "dark"
+        self._apply_titlebar_dwm()
+        try:  # re-apply after CTk's update settles so the repaint sticks
+            self.after(50, self._apply_titlebar_dwm)
+        except Exception:
+            pass
+
+    def _apply_titlebar_dwm(self):
+        try:
+            import ctypes
+
+            dark = ctypes.c_int(1 if getattr(self, "_titlebar_dark", False) else 0)
+            hwnd = ctypes.windll.user32.GetAncestor(self.winfo_id(), 2)  # GA_ROOT
+            if ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, 20, ctypes.byref(dark), ctypes.sizeof(dark)) != 0:
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(  # pre-20H1 attribute
+                    hwnd, 19, ctypes.byref(dark), ctypes.sizeof(dark))
+            SWP = 0x1 | 0x2 | 0x4 | 0x20  # NOSIZE|NOMOVE|NOZORDER|FRAMECHANGED
+            ctypes.windll.user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, SWP)
+        except Exception:
+            pass
 
     def _build(self):
         app = self.app
@@ -347,10 +347,6 @@ class SettingsDialog(ctk.CTkToplevel):
         self._close()
 
     def _close(self):
-        try:
-            self.grab_release()
-        except Exception:
-            pass
         self.app._unregister_validity_label(self.valid_lbl)
         self.app._settings_win = None
         self.destroy()
@@ -375,9 +371,13 @@ class App:
         # Desktop-notification preference (settings dialog toggle); default on.
         self.notify_on_complete = tk.BooleanVar(
             value=bool(cfg.get("notify_on_complete", True)))
-        # Theme choice lives in the settings dialog; keep it here so the dialog's
-        # dropdown reflects the current selection each time it opens.
-        self.appearance_mode = tk.StringVar(value="システム")
+        # Theme choice lives in the settings dialog; persisted in config and
+        # restored here so it survives a restart.
+        saved_theme = cfg.get("appearance_mode", "システム")
+        if saved_theme not in APPEARANCE:
+            saved_theme = "システム"
+        self.appearance_mode = tk.StringVar(value=saved_theme)
+        ctk.set_appearance_mode(APPEARANCE[saved_theme])
         self.cookies_status = tk.StringVar(value="")
         self.cookies_valid = tk.StringVar(value="")
         self._settings_win = None
@@ -616,10 +616,20 @@ class App:
             self.root.after(0, self._set_check_btn_state, "normal")
 
     def _set_appearance(self, choice):
+        self.appearance_mode.set(choice)  # authoritative source for persistence
+        self._persist_appearance()  # so the choice survives a restart
+        # Safe to apply inline now: SettingsDialog overrides the title-bar recolor
+        # so switching the theme no longer withdraws the open dialog.
         ctk.set_appearance_mode(APPEARANCE.get(choice, "system"))
-        win = self._settings_win
-        if win is not None and win.winfo_exists():
-            win.after(60, lambda: _apply_titlebar_theme(win))
+
+    def _persist_appearance(self):
+        """Save just the theme choice immediately (independent of unsaved edits)."""
+        try:
+            cfg = core.load_config()
+            cfg["appearance_mode"] = self.appearance_mode.get()
+            core.save_config(cfg)
+        except Exception:
+            pass
 
     def _settings_ready(self) -> bool:
         """Token and parent-page URL are the two required settings; DB ID is optional."""
@@ -635,12 +645,24 @@ class App:
             self.sync_btn.configure(state="disabled")
 
     def open_settings(self):
-        """Open (or focus) the modal settings dialog."""
+        """Open, or re-show and focus, the settings dialog.
+
+        Self-heals: if the existing dialog was withdrawn (e.g. by an appearance
+        recolor) deiconify it; if it's in a bad state, recreate it.
+        """
         win = self._settings_win
         if win is not None and win.winfo_exists():
-            win.lift()
-            win.focus_force()
-            return
+            try:
+                win.deiconify()  # recover it if it got withdrawn
+                win.lift()
+                win.focus_force()
+                return
+            except Exception:
+                try:
+                    win.destroy()
+                except Exception:
+                    pass
+                self._settings_win = None
         self._settings_win = SettingsDialog(self)
 
     def _import_cookies(self):
@@ -754,6 +776,7 @@ class App:
             "notion_parent_page_id": self.parent.get().strip(),
             "notion_database_id": self.dbid.get().strip(),
             "notify_on_complete": bool(self.notify_on_complete.get()),
+            "appearance_mode": self.appearance_mode.get(),
         }
 
     def save(self):

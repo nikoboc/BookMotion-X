@@ -255,10 +255,11 @@ class SettingsDialog(ctk.CTkToplevel):
         outer.pack(fill="both", expand=True, padx=20, pady=18)
         outer.columnconfigure(0, weight=1)
 
+        # Notion 接続情報 sits below Kindle 接続情報 (row 0); see c2 below.
         card = ctk.CTkFrame(outer, corner_radius=12)
-        card.grid(row=0, column=0, sticky="ew")
+        card.grid(row=1, column=0, sticky="ew", pady=(12, 0))
         card.columnconfigure(1, weight=1)
-        ctk.CTkLabel(card, text="Notion 接続", font=app.f_section, anchor="w").grid(
+        ctk.CTkLabel(card, text="Notion 接続情報", font=app.f_section, anchor="w").grid(
             row=0, column=0, columnspan=3, sticky="w", padx=16, pady=(14, 4))
 
         ctk.CTkLabel(card, text="Notion トークン", font=app.f_body, anchor="w").grid(
@@ -286,13 +287,13 @@ class SettingsDialog(ctk.CTkToplevel):
             text="空欄のまま同期すると、新しいデータベースを自動作成します。",
         ).grid(row=4, column=1, columnspan=2, sticky="w", padx=(0, 16), pady=(0, 16))
 
-        # --- card: 取得設定 (cookie management) ---
+        # --- card: Kindle 接続情報 (cookie management) — top of the dialog ---
         c2 = ctk.CTkFrame(outer, corner_radius=12)
-        c2.grid(row=1, column=0, sticky="ew", pady=(12, 0))
+        c2.grid(row=0, column=0, sticky="ew")
         c2.columnconfigure(0, weight=1)
-        ctk.CTkLabel(c2, text="取得設定", font=app.f_section, anchor="w").grid(
+        ctk.CTkLabel(c2, text="Kindle 接続情報", font=app.f_section, anchor="w").grid(
             row=0, column=0, sticky="w", padx=16, pady=(14, 4))
-        ctk.CTkLabel(c2, text="Cookie（cookies.txt）", font=app.f_body, anchor="w").grid(
+        ctk.CTkLabel(c2, text="cookies.txt", font=app.f_body, anchor="w").grid(
             row=1, column=0, sticky="w", padx=16, pady=(0, 4))
         ff = ctk.CTkFrame(c2, fg_color="transparent")
         ff.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 14))
@@ -495,8 +496,8 @@ class HelpDialog(ctk.CTkToplevel):
                    COOKIES_EXT_SEARCH_URL)
         self._step(b, "3. read.amazon.co.jp を開いた状態で拡張機能を起動し、cookies.txt "
                       "をエクスポート（Export／Download）します。")
-        self._step(b, "4. 「⚙ 設定」の Cookie 欄「取り込み…」から、その cookies.txt を"
-                      "選びます。")
+        self._step(b, "4. 「⚙ 設定」の「Kindle 接続情報」→「取り込み…」から、その "
+                      "cookies.txt を選びます。")
         self._note(b, "取り込み後は元ファイル不要です。「✕ 期限切れ」と表示されたら、"
                       "ログインし直して cookies.txt を取り直し、もう一度「取り込み…」して"
                       "ください。")
@@ -631,8 +632,8 @@ class App:
             text="⚠ トークンと親ページ URL が未設定です。「⚙ 設定」から入力してください。")
         self.warn.grid(row=1, column=0, sticky="w", pady=(0, 10))
 
-        # --- card: Cookie (read-only status;管理は「⚙ 設定」ダイアログで) ---
-        c2 = self._card(2, "Cookie")
+        # --- card: Kindle 接続情報 (read-only status;管理は「⚙ 設定」ダイアログで) ---
+        c2 = self._card(2, "Kindle 接続情報")
         cf = ctk.CTkFrame(c2, fg_color="transparent")
         cf.grid(row=1, column=0, columnspan=3, sticky="ew", padx=16, pady=(0, 14))
         cf.columnconfigure(0, weight=1)
@@ -857,7 +858,7 @@ class App:
         """Delete the app's saved cookies."""
         if not core.has_saved_cookies():
             return
-        if not messagebox.askyesno("確認", "保存済みの Cookie を削除しますか？"):
+        if not messagebox.askyesno("確認", "保存済みの Kindle 接続情報を削除しますか？"):
             return
         core.clear_saved_cookies()
         self._refresh_cookie_status()

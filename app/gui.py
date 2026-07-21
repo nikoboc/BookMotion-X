@@ -751,7 +751,8 @@ class App:
 
         The packaged exe/.app already carries the icon via PyInstaller --icon;
         this makes the running *window* match too (notably when run from source).
-        Windows uses the .ico via iconbitmap (also styles child dialogs); other
+        On Windows, iconbitmap only sets a small icon (the taskbar then upscales
+        it), so we also push crisp big/small HICONs via WM_SETICON. Other
         platforms fall back to a PhotoImage. Any failure is a silent no-op.
         """
         d = _icons_dir()
@@ -759,7 +760,8 @@ class App:
             if sys.platform.startswith("win"):
                 ico = d / "appicon.ico"
                 if ico.is_file():
-                    self.root.iconbitmap(default=str(ico))
+                    self.root.iconbitmap(default=str(ico))  # child dialogs inherit it
+                    self._set_win_taskbar_icon(str(ico))
                     return
             png = d / "appicon.png"
             if png.is_file():
@@ -767,6 +769,49 @@ class App:
                 self.root.iconphoto(True, self._win_icon)
         except Exception:
             pass
+
+    def _set_win_taskbar_icon(self, ico_path):
+        """Give the window a crisp large icon for the taskbar / Alt-Tab.
+
+        Tk's iconbitmap only sets a small class icon, which the taskbar then
+        upscales (very blurry on hi-DPI). The taskbar reads the window's *class*
+        icon (GCLP_HICON), so we replace it — and the WM_SETICON icons — with real
+        256/32 px frames loaded from the .ico. Re-asserted after the window is
+        mapped in case Tk re-sets its own. argtypes are explicit so the 64-bit
+        HICON handles aren't truncated.
+        """
+        import ctypes
+
+        u = ctypes.windll.user32
+        u.LoadImageW.restype = ctypes.c_void_p
+        u.LoadImageW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint,
+                                 ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+        u.SendMessageW.restype = ctypes.c_void_p
+        u.SendMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint,
+                                   ctypes.c_void_p, ctypes.c_void_p]
+        u.SetClassLongPtrW.restype = ctypes.c_void_p
+        u.SetClassLongPtrW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
+        u.GetAncestor.restype = ctypes.c_void_p
+        u.GetAncestor.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+
+        IMAGE_ICON, LR_LOADFROMFILE, WM_SETICON = 1, 0x00000010, 0x0080
+        ICON_SMALL, ICON_BIG = 0, 1
+        GCLP_HICON, GCLP_HICONSM = -14, -34
+        self._hicon_small = u.LoadImageW(None, ico_path, IMAGE_ICON, 32, 32, LR_LOADFROMFILE)
+        self._hicon_big = u.LoadImageW(None, ico_path, IMAGE_ICON, 256, 256, LR_LOADFROMFILE)
+
+        def apply():
+            hwnd = u.GetAncestor(self.root.winfo_id(), 2)  # GA_ROOT (top-level frame)
+            if self._hicon_small:
+                u.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, self._hicon_small)
+                u.SetClassLongPtrW(hwnd, GCLP_HICONSM, self._hicon_small)
+            if self._hicon_big:
+                u.SendMessageW(hwnd, WM_SETICON, ICON_BIG, self._hicon_big)
+                u.SetClassLongPtrW(hwnd, GCLP_HICON, self._hicon_big)  # taskbar reads this
+
+        apply()
+        # Re-assert after the window is realized/mapped so Tk can't override it.
+        self.root.after(200, apply)
 
     def _build(self):
         self.outer = ctk.CTkFrame(self.root, fg_color="transparent")
@@ -1239,6 +1284,13 @@ class App:
 
 
 def main():
+    if sys.platform.startswith("win"):
+        try:  # own taskbar identity (+icon), not grouped under python.exe
+            import ctypes
+
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Booklight.App")
+        except Exception:
+            pass
     register_bundled_fonts()  # before ctk.CTk() so Tk sees the new families
     ctk.set_default_color_theme("blue")  # base structure; recolored by _apply_palette
     _apply_palette()

@@ -162,8 +162,8 @@ class SettingsDialog(ctk.CTkToplevel):
         super().__init__(app.root)
         self.app = app
         self.title("設定")
-        self.geometry("560x600")
-        self.minsize(480, 520)
+        self.geometry("560x700")
+        self.minsize(480, 600)
         self.transient(app.root)
         self.protocol("WM_DELETE_WINDOW", self._close)
         self._build()
@@ -241,8 +241,22 @@ class SettingsDialog(ctk.CTkToplevel):
         app._register_validity_label(self.valid_lbl)
         self.refresh_cookie_buttons(core.has_saved_cookies())
 
+        # --- card: 外観 (theme) ---
+        c3 = ctk.CTkFrame(outer, corner_radius=12)
+        c3.grid(row=2, column=0, sticky="ew", pady=(12, 0))
+        c3.columnconfigure(1, weight=1)
+        ctk.CTkLabel(c3, text="外観", font=app.f_section, anchor="w").grid(
+            row=0, column=0, columnspan=2, sticky="w", padx=16, pady=(14, 4))
+        ctk.CTkLabel(c3, text="テーマ", font=app.f_body, anchor="w").grid(
+            row=1, column=0, sticky="w", padx=(16, 8), pady=(0, 14))
+        ctk.CTkOptionMenu(
+            c3, values=list(APPEARANCE), variable=app.appearance_mode, width=140,
+            font=app.f_small, command=app._set_appearance, fg_color=ACCENT,
+            button_color=ACCENT, button_hover_color=ACCENT_HOVER).grid(
+            row=1, column=1, sticky="w", padx=(0, 16), pady=(0, 14))
+
         br = ctk.CTkFrame(outer, fg_color="transparent")
-        br.grid(row=2, column=0, sticky="ew", pady=(14, 0))
+        br.grid(row=3, column=0, sticky="ew", pady=(14, 0))
         br.columnconfigure(0, weight=1)
         save_btn = app._accent(br, "保存して閉じる", self._save_close)
         save_btn.configure(height=38)
@@ -287,6 +301,9 @@ class App:
         self.token = tk.StringVar(value=cfg.get("notion_token", ""))
         self.parent = tk.StringVar(value=cfg.get("notion_parent_page_id", ""))
         self.dbid = tk.StringVar(value=cfg.get("notion_database_id", ""))
+        # Theme choice lives in the settings dialog; keep it here so the dialog's
+        # dropdown reflects the current selection each time it opens.
+        self.appearance_mode = tk.StringVar(value="システム")
         self.cookies_status = tk.StringVar(value="")
         self.cookies_valid = tk.StringVar(value="")
         self._settings_win = None
@@ -372,12 +389,6 @@ class App:
                      anchor="w").pack(anchor="w")
         ctk.CTkLabel(titles, text="Kindle のハイライトを Notion に同期します",
                      font=self.f_sub, text_color=MUTED, anchor="w").pack(anchor="w")
-        self.appearance = ctk.CTkOptionMenu(
-            hdr, values=list(APPEARANCE), width=112, font=self.f_small,
-            command=self._set_appearance, fg_color=ACCENT, button_color=ACCENT,
-            button_hover_color=ACCENT_HOVER)
-        self.appearance.set("システム")
-        self.appearance.grid(row=0, column=1, sticky="e")
 
         # --- settings-incomplete banner (row 1); hidden once token + URL are set ---
         self.warn = ctk.CTkLabel(

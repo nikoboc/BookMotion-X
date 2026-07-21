@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import locale
 import os
 import re
 import shutil
@@ -38,6 +39,93 @@ UA = (
 )
 
 COLOR_JA = {"yellow": "黄色", "blue": "青", "pink": "ピンク", "orange": "オレンジ"}
+
+
+# ---- UI language for runtime messages (progress / log / errors) --------------
+# NOTE: this covers only user-facing *messages*. The Notion database schema
+# (property names like 注釈ID and the マーカー色 option names) is data written
+# into the user's database and is intentionally NOT translated — renaming it
+# would break dedup/appends against existing databases.
+def _detect_os_lang():
+    """'ja' if the OS UI language is Japanese, else 'en'. Best-effort; 'ja' on error."""
+    try:
+        if sys.platform.startswith("win"):
+            import ctypes
+
+            prim = ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0x3FF
+            return "ja" if prim == 0x11 else "en"  # 0x11 = Japanese primary language
+        code = ""
+        try:
+            code = locale.getlocale()[0] or ""
+        except Exception:
+            code = ""
+        if not code:
+            code = (locale.getdefaultlocale() or ["", ""])[0] or ""
+        return "ja" if str(code).lower().startswith("ja") else "en"
+    except Exception:
+        return "ja"
+
+
+LANG = "ja"
+
+
+def set_language(lang):
+    """Set the language for runtime messages. 'ja'/'en' set it directly; anything
+    else (e.g. 'auto') auto-detects from the OS. The GUI passes its resolved
+    language; the CLI auto-detects (or follows the saved preference)."""
+    global LANG
+    LANG = lang if lang in ("ja", "en") else _detect_os_lang()
+    return LANG
+
+
+def t(key):
+    pair = _TR.get(key)
+    return (pair[1] if LANG == "en" else pair[0]) if pair else key
+
+
+_TR = {
+    "err_no_cookies": ("cookies.txt が指定されていません。", "No cookies.txt was specified."),
+    "log_cookies_loaded": ("cookies.txt から {n} 件のCookieを読み込みました",
+                           "Loaded {n} cookies from cookies.txt"),
+    "err_not_logged_in": (
+        "ログインしていません。Cookie の有効期限が切れた可能性があります。"
+        "ブラウザで read.amazon.co.jp にログインし直し、新しい cookies.txt を"
+        "書き出して「取り込み…」から入れ直してください。",
+        "Not logged in — your cookies may have expired. Log back in to "
+        "read.amazon.co.jp, export a fresh cookies.txt, and re-import it via “Import…”."),
+    "err_fetch_books": ("本を取得できませんでした。ログイン状態を確認してください。",
+                        "Couldn't fetch your books. Check that you're logged in."),
+    "log_fetch_library": ("本一覧を取得中…", "Fetching your library…"),
+    "prog_fetch_library": ("本一覧を取得中", "Fetching library"),
+    "log_books_found": ("{n} 冊を検出", "Found {n} books"),
+    "log_book_line": ("({i}/{total}) {title} … {n} 件",
+                      "({i}/{total}) {title} … {n} highlights"),
+    "prog_fetch_highlights": ("ハイライト取得", "Fetching highlights"),
+    "err_rate_limit": ("Notion のレート制限で再試行上限に達しました。",
+                       "Hit Notion's rate limit — retry limit reached."),
+    "err_no_parent": ("親ページID（または既存DB ID）が未設定です。",
+                      "No parent page ID (or existing DB ID) is set."),
+    "log_creating_db": ("Notion データベースを作成中…", "Creating the Notion database…"),
+    "log_created": ("作成: {x}", "Created: {x}"),
+    "log_existing": ("既存 {n} 件を確認", "Checked {n} existing entries"),
+    "log_to_insert": ("登録対象 {n} 件（重複スキップ {s} 件）",
+                      "{n} to insert ({s} duplicates skipped)"),
+    "prog_notion_insert": ("Notion 登録", "Inserting into Notion"),
+    "log_insert_failed": ("  登録失敗: {e}", "  Insert failed: {e}"),
+    "log_insert_progress": ("  Notion 登録 {i}/{total}（成功{ok}/失敗{fail}）",
+                            "  Notion insert {i}/{total} (ok {ok} / failed {fail})"),
+    "err_no_token": ("Notion トークンが未設定です。", "No Notion token is set."),
+    "err_zero_books": ("本が0冊でした。ログイン状態を確認してください。",
+                       "Found 0 books. Check that you're logged in."),
+    # CLI
+    "cli_help_cookies": ("エクスポート済み cookies.txt", "Exported cookies.txt"),
+    "cli_help_limit": ("先頭 N 冊だけ（テスト用）", "First N books only (for testing)"),
+    "cli_set_token": ("config.json に notion_token を設定してください: {path}",
+                      "Set notion_token in config.json: {path}"),
+    "cli_error": ("エラー:", "Error:"),
+    "cli_summary": ("完了: 対象 {total} / 新規 {inserted} / 重複 {skipped} / 失敗 {failed}",
+                    "Done: {total} items / New {inserted} / Dup {skipped} / Failed {failed}"),
+}
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 LOCAL_CONFIG = SCRIPT_DIR / "config.json"
@@ -141,10 +229,10 @@ def clear_saved_cookies() -> None:
 # ---------------------------------------------------------------- session / cookies
 def load_cookies(cookies_file, log=print):
     if not cookies_file:
-        raise RuntimeError("cookies.txt が指定されていません。")
+        raise RuntimeError(t("err_no_cookies"))
     cj = MozillaCookieJar()
     cj.load(cookies_file, ignore_discard=True, ignore_expires=True)
-    log(f"cookies.txt から {len(cj)} 件のCookieを読み込みました")
+    log(t("log_cookies_loaded").format(n=len(cj)))
     return cj
 
 
@@ -280,18 +368,14 @@ def fetch_all_books(session: requests.Session) -> list:
     """
     r = session.get(NOTEBOOK, timeout=30)
     if "signin" in r.url or "/ap/" in r.url:
-        raise RuntimeError(
-            "ログインしていません。Cookie の有効期限が切れた可能性があります。"
-            "ブラウザで read.amazon.co.jp にログインし直し、新しい cookies.txt を"
-            "書き出して「取り込み…」から入れ直してください。"
-        )
+        raise RuntimeError(t("err_not_logged_in"))
     soup = BeautifulSoup(r.text, "html.parser")
     csrf_el = soup.select_one("input[name='anti-csrftoken-a2z']")
     csrf = csrf_el.get("value") if csrf_el else None
 
     books = parse_books(r.text)
     if not books:
-        raise RuntimeError("本を取得できませんでした。ログイン状態を確認してください。")
+        raise RuntimeError(t("err_fetch_books"))
     token = _next_library_token(r.text)
 
     # Paginated endpoint for the remaining batches. It expects the CSRF token
@@ -326,18 +410,20 @@ def fetch_book_annotations(session: requests.Session, asin: str) -> list:
 
 
 def fetch_kindle(session: requests.Session, limit, log=print, progress=None) -> list:
-    log("本一覧を取得中…")
+    log(t("log_fetch_library"))
     if progress:
-        progress("本一覧を取得中", 0, 0)  # count unknown yet → indeterminate
+        progress(t("prog_fetch_library"), 0, 0)  # count unknown yet → indeterminate
     books = fetch_all_books(session)
-    log(f"{len(books)} 冊を検出")
+    log(t("log_books_found").format(n=len(books)))
     if limit:
         books = books[:limit]
     for i, b in enumerate(books, 1):
         b["annotations"] = fetch_book_annotations(session, b["asin"])
-        log(f"({i}/{len(books)}) {b.get('title') or b['asin']} … {len(b['annotations'])} 件")
+        log(t("log_book_line").format(
+            i=i, total=len(books), title=b.get("title") or b["asin"],
+            n=len(b["annotations"])))
         if progress:
-            progress("ハイライト取得", i, len(books))
+            progress(t("prog_fetch_highlights"), i, len(books))
     return books
 
 
@@ -369,7 +455,7 @@ def notion_fetch(token: str, path: str, method: str, body=None):
         if not r.ok:
             raise RuntimeError(f"Notion {r.status_code}: {data.get('message', r.reason)}")
         return data
-    raise RuntimeError("Notion のレート制限で再試行上限に達しました。")
+    raise RuntimeError(t("err_rate_limit"))
 
 
 def check_notion(token: str) -> bool:
@@ -516,23 +602,23 @@ def notion_sync(token, parent_page_id, database_id, books, today, log=print,
     if not db_id:
         parent = normalize_id(parent_page_id or "")
         if not parent:
-            raise RuntimeError("親ページID（または既存DB ID）が未設定です。")
-        log("Notion データベースを作成中…")
+            raise RuntimeError(t("err_no_parent"))
+        log(t("log_creating_db"))
         db = create_database(token, parent)
         db_id = db["id"]
-        log("作成: " + (db.get("url") or db_id))
+        log(t("log_created").format(x=db.get("url") or db_id))
         if on_database:
             on_database(db_id)
 
     ensure_schema(token, db_id)
     existing = query_existing_keys(token, db_id)
-    log(f"既存 {len(existing)} 件を確認")
+    log(t("log_existing").format(n=len(existing)))
 
     rows = build_rows(books, today)
     fresh = [r for r in rows if r["key"] not in existing]
-    log(f"登録対象 {len(fresh)} 件（重複スキップ {len(rows) - len(fresh)} 件）")
+    log(t("log_to_insert").format(n=len(fresh), s=len(rows) - len(fresh)))
     if progress:
-        progress("Notion 登録", 0, len(fresh))
+        progress(t("prog_notion_insert"), 0, len(fresh))
 
     ok = fail = 0
     min_interval = 0.34  # ~3 req/s
@@ -548,11 +634,12 @@ def notion_sync(token, parent_page_id, database_id, books, today, log=print,
             ok += 1
         except Exception as e:
             fail += 1
-            log("  登録失敗: " + str(e))
+            log(t("log_insert_failed").format(e=e))
         if progress:
-            progress("Notion 登録", i + 1, len(fresh))
+            progress(t("prog_notion_insert"), i + 1, len(fresh))
         if (i + 1) % 20 == 0 or i == len(fresh) - 1:
-            log(f"  Notion 登録 {i + 1}/{len(fresh)}（成功{ok}/失敗{fail}）")
+            log(t("log_insert_progress").format(
+                i=i + 1, total=len(fresh), ok=ok, fail=fail))
         dt = time.time() - t0
         if i < len(fresh) - 1 and dt < min_interval:
             time.sleep(min_interval - dt)
@@ -570,11 +657,11 @@ def run_sync(cfg: dict, cookies_file=None, limit=None, log=print, progress=None)
     """End-to-end sync used by both the CLI and the GUI. Persists a newly
     created database_id back into cfg + config.json."""
     if not cfg.get("notion_token"):
-        raise RuntimeError("Notion トークンが未設定です。")
+        raise RuntimeError(t("err_no_token"))
     session = build_session(cookies_file, log)
     books = fetch_kindle(session, limit, log, progress)
     if not books:
-        raise RuntimeError("本が0冊でした。ログイン状態を確認してください。")
+        raise RuntimeError(t("err_zero_books"))
 
     had_db = bool((cfg.get("notion_database_id") or "").strip())
 
@@ -600,24 +687,24 @@ def run_sync(cfg: dict, cookies_file=None, limit=None, log=print, progress=None)
 
 # ---------------------------------------------------------------- main (CLI)
 def main() -> int:
+    cfg = load_config()
+    set_language(cfg.get("ui_language", "auto"))  # follow the saved pref, else OS
     ap = argparse.ArgumentParser(description="Kindle highlights → Notion (browser-free)")
-    ap.add_argument("-c", "--cookies-file", required=True, help="エクスポート済み cookies.txt")
-    ap.add_argument("--limit", type=int, help="先頭 N 冊だけ（テスト用）")
+    ap.add_argument("-c", "--cookies-file", required=True, help=t("cli_help_cookies"))
+    ap.add_argument("--limit", type=int, help=t("cli_help_limit"))
     args = ap.parse_args()
 
-    cfg = load_config()
     if not cfg.get("notion_token"):
-        print(f"config.json に notion_token を設定してください: {get_config_path()}")
+        print(t("cli_set_token").format(path=get_config_path()))
         return 1
     try:
         res = run_sync(cfg, args.cookies_file, args.limit)
     except RuntimeError as e:
-        print("エラー:", e)
+        print(t("cli_error"), e)
         return 2
-    print(
-        f"完了: 対象 {res['total']} / 新規 {res['inserted']} / "
-        f"重複 {res['skipped']} / 失敗 {res['failed']}"
-    )
+    print(t("cli_summary").format(
+        total=res["total"], inserted=res["inserted"],
+        skipped=res["skipped"], failed=res["failed"]))
     return 0
 
 

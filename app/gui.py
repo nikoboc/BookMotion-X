@@ -4,6 +4,7 @@
 Enter your Notion token / parent page / cookies right in the window — no file
 editing. Values are saved to config.json (Application Support when packaged).
 """
+import locale
 import subprocess
 import sys
 import threading
@@ -74,7 +75,208 @@ def _apply_palette():
     put("CTkTextbox", fg_color=BASE, text_color=TEXT, border_color=SUB)
     put("CTkScrollbar", button_color=SUB, button_hover_color=SUB_HOVER)
 
-APPEARANCE = {"システム": "system", "ライト": "light", "ダーク": "dark"}
+# ---- UI language (auto-detected from the OS; overridable in Settings) --------
+def _detect_os_lang():
+    """'ja' if the OS UI language is Japanese, else 'en'. Best-effort; 'ja' on error."""
+    try:
+        if sys.platform.startswith("win"):
+            import ctypes
+
+            prim = ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0x3FF
+            return "ja" if prim == 0x11 else "en"  # 0x11 = Japanese primary language
+        code = ""
+        try:
+            code = locale.getlocale()[0] or ""
+        except Exception:
+            code = ""
+        if not code:
+            code = (locale.getdefaultlocale() or ["", ""])[0] or ""
+        return "ja" if str(code).lower().startswith("ja") else "en"
+    except Exception:
+        return "ja"
+
+
+LANG = "ja"  # active UI language; set once at startup by set_language().
+
+
+def set_language(pref):
+    """pref: 'auto' (follow the OS), 'ja', or 'en'. Returns the resolved language."""
+    global LANG
+    LANG = _detect_os_lang() if pref not in ("ja", "en") else pref
+    return LANG
+
+
+def t(key):
+    """Translate a UI-string key into the active language (returns the key if unknown)."""
+    pair = _TR.get(key)
+    if not pair:
+        return key
+    return pair[1] if LANG == "en" else pair[0]
+
+
+# (ja, en) for every user-facing string. Developer comments and progress/log
+# phrases emitted by the core engine (kindle_notion.py) are out of scope.
+_TR = {
+    # main window
+    "app_subtitle": ("Kindle のハイライトを Notion に同期します",
+                     "Sync your Kindle highlights to Notion"),
+    "warn_incomplete": ("⚠ トークンと親ページ URL が未設定です。「⚙ 設定」から入力してください。",
+                        "⚠ Notion token and parent page URL aren't set. Enter them in “⚙ Settings”."),
+    "btn_settings": ("⚙ 設定", "⚙ Settings"),
+    "btn_sync": ("Notion へ同期", "Sync to Notion"),
+    "log_label": ("ログ", "Log"),
+    # connection status
+    "acct_set": ("アカウント情報設定済み", "Account configured"),
+    "acct_unset": ("アカウント情報未設定", "Account not configured"),
+    "conn_ok": ("✓ 接続OK", "✓ Connected"),
+    "checking": ("確認中…", "Checking…"),
+    "cookies_expired": ("✕ 期限切れ — 設定の「取り込み…」から新しい cookies.txt を入れ直してください",
+                        "✕ Expired — re-import a fresh cookies.txt from “Import…” in Settings"),
+    "conn_failed": ("接続を確認できませんでした（ネットワーク未接続など）",
+                    "Couldn't check the connection (no network, etc.)"),
+    "token_invalid": ("✕ トークンが無効です — 設定で確認してください",
+                      "✕ Invalid token — check it in Settings"),
+    # settings dialog
+    "settings_title": ("設定", "Settings"),
+    "notion_conn": ("Notion 接続情報", "Notion connection"),
+    "notion_token": ("Notion トークン", "Notion token"),
+    "show": ("表示", "Show"),
+    "parent_url": ("親ページ URL", "Parent page URL"),
+    "db_id_optional": ("DB ID（任意）", "Database ID (optional)"),
+    "db_id_hint": ("空欄のまま同期すると、新しいデータベースを自動作成します。",
+                   "Leave blank to auto-create a new database on sync."),
+    "kindle_conn": ("Kindle 接続情報", "Kindle connection"),
+    "btn_check": ("接続確認", "Test"),
+    "btn_import": ("取り込み…", "Import…"),
+    "btn_clear": ("クリア", "Clear"),
+    "appearance": ("外観", "Appearance"),
+    "theme": ("テーマ", "Theme"),
+    "theme_system": ("システム", "System"),
+    "theme_light": ("ライト", "Light"),
+    "theme_dark": ("ダーク", "Dark"),
+    "language": ("言語", "Language"),
+    "lang_auto": ("自動", "Auto"),
+    "lang_restart_note": ("言語の変更は再起動後に反映されます。",
+                          "Language changes take effect after a restart."),
+    "notifications": ("通知", "Notifications"),
+    "notify_toggle": ("同期完了時にデスクトップ通知を出す",
+                      "Show a desktop notification when a sync finishes"),
+    "btn_help": ("❓ 取得方法", "❓ Setup guide"),
+    "btn_save_close": ("保存して閉じる", "Save & close"),
+    "btn_close": ("閉じる", "Close"),
+    # help dialog
+    "help_title": ("取得方法 / ヘルプ", "Setup guide / Help"),
+    "help_intro": ("同期には ① Notion トークン ② 親ページ URL ③（任意）DB ID ④ cookies.txt が必要です。入力は「⚙ 設定」で行います。",
+                   "You need ① a Notion token, ② a parent page URL, ③ (optional) a DB ID, and ④ cookies.txt. Enter them in “⚙ Settings”."),
+    "help1_title": ("① Notion トークンの取得", "① Get a Notion token"),
+    "help1_s1": ("1. 下のリンクから「マイインテグレーション」を開きます。",
+                 "1. Open “My integrations” from the link below."),
+    "help1_l1": ("🔗 notion.so/my-integrations を開く", "🔗 Open notion.so/my-integrations"),
+    "help1_s2": ("2. 「新しいインテグレーション」を作成します（種類は内部/Internal）。",
+                 "2. Create a “New integration” (type: Internal)."),
+    "help1_s3": ("3. 表示された「Internal Integration Token」（ntn_… または secret_… で始まる文字列）をコピーします。",
+                 "3. Copy the “Internal Integration Token” shown (it starts with ntn_… or secret_…)."),
+    "help1_s4": ("4. 「⚙ 設定」の「Notion トークン」欄に貼り付けます。",
+                 "4. Paste it into the “Notion token” field in “⚙ Settings”."),
+    "help1_note": ("⚠ トークンを作っただけでは書き込めません。②の親ページに、このインテグレーションを「連携」から追加してください（忘れると 404 エラー）。",
+                   "⚠ Creating the token isn't enough — add this integration to the parent page (②) via “Connections”, or writes fail with a 404."),
+    "help2_title": ("② 親ページ URL の取得と連携", "② Get the parent page URL and connect it"),
+    "help2_s1": ("1. データベースを置きたい Notion のページを開きます（新しい空ページを作ってもOK）。",
+                 "1. Open the Notion page where the database should live (a new empty page is fine)."),
+    "help2_l1": ("🔗 Notion を開く", "🔗 Open Notion"),
+    "help2_s2": ("2. そのページの URL をコピーし、「⚙ 設定」の「親ページ URL」欄に貼り付けます。",
+                 "2. Copy that page's URL and paste it into the “Parent page URL” field in “⚙ Settings”."),
+    "help2_s3": ("3. ページ右上の「•••」→「連携（コネクト）」→ ①で作ったインテグレーションを追加します。",
+                 "3. Top-right “•••” → “Connections” → add the integration you made in ①."),
+    "help2_note": ("この「連携」を忘れると、トークンが正しくても 404 で失敗します。",
+                   "Skip this “Connection” and it fails with a 404 even with a valid token."),
+    "help3_title": ("③ データベース ID（任意）", "③ Database ID (optional)"),
+    "help3_s1": ("空欄のまま同期すると、新しいデータベースを自動作成します。通常は空欄でOKです。",
+                 "Leave it blank to auto-create a new database on sync. Blank is fine for most cases."),
+    "help3_s2": ("既存のデータベースに追記したい場合のみ、その DB を Notion のブラウザで開きます。",
+                 "Only if you want to append to an existing database, open that DB in the Notion browser."),
+    "help3_s3": ("URL「notion.so/…/xxxxxxxx?v=…」の xxxxxxxx（32 桁の英数字）が DB ID です。これを「⚙ 設定」の「DB ID」欄に貼り付けます。",
+                 "In the URL “notion.so/…/xxxxxxxx?v=…”, the xxxxxxxx (32 hex chars) is the DB ID. Paste it into the “DB ID” field in “⚙ Settings”."),
+    "help3_note": ("最後のスラッシュの後ろ・「?v=」より前が DB ID です（末尾のページ名部分は無視されます）。",
+                   "The DB ID is the part after the last slash and before “?v=” (any trailing page-name part is ignored)."),
+    "help4_title": ("④ cookies.txt の取得", "④ Get cookies.txt"),
+    "help4_s1": ("1. ブラウザで read.amazon.co.jp にログインしておきます。",
+                 "1. Log in to read.amazon.co.jp in your browser."),
+    "help4_l1": ("🔗 read.amazon.co.jp/notebook を開く", "🔗 Open read.amazon.co.jp/notebook"),
+    "help4_s2": ("2. Cookie 書き出し用の拡張機能を入れます（例:「Get cookies.txt LOCALLY」）。",
+                 "2. Install a cookie-export extension (e.g. “Get cookies.txt LOCALLY”)."),
+    "help4_l2": ("🔗 Chrome ウェブストアで「get cookies.txt」を検索",
+                 "🔗 Search the Chrome Web Store for “get cookies.txt”"),
+    "help4_s3": ("3. read.amazon.co.jp を開いた状態で拡張機能を起動し、cookies.txt をエクスポート（Export／Download）します。",
+                 "3. With read.amazon.co.jp open, run the extension and export/download cookies.txt."),
+    "help4_s4": ("4. 「⚙ 設定」の「Kindle 接続情報」→「取り込み…」から、その cookies.txt を選びます。",
+                 "4. In “⚙ Settings” → “Kindle connection” → “Import…”, pick that cookies.txt."),
+    "help4_note": ("取り込み後は元ファイル不要です。「✕ 期限切れ」と表示されたら、ログインし直して cookies.txt を取り直し、もう一度「取り込み…」してください。",
+                   "After importing, the original file isn't needed. If you see “✕ Expired”, log in again, re-export cookies.txt, and “Import…” once more."),
+    # dialogs / message boxes / file dialog
+    "mb_check_title": ("接続確認", "Test connection"),
+    "mb_import_first": ("先に cookies.txt を取り込んでください。", "Please import cookies.txt first."),
+    "filedlg_import_title": ("cookies.txt を取り込む", "Import cookies.txt"),
+    "filedlg_all": ("すべて", "All files"),
+    "mb_import_err_title": ("取り込みエラー", "Import error"),
+    "mb_import_err": ("cookies.txt を読み込めませんでした:\n{e}", "Couldn't read cookies.txt:\n{e}"),
+    "mb_confirm_title": ("確認", "Confirm"),
+    "mb_clear_confirm": ("保存済みの Kindle 接続情報を削除しますか？", "Delete the saved Kindle connection info?"),
+    "mb_syncing_title": ("同期中", "Sync in progress"),
+    "mb_quit_confirm": ("同期を実行中です。中断して終了しますか？\n（登録済みの分は残り、次回の実行で続きから再開できます）",
+                        "A sync is running. Stop it and quit?\n(Already-saved items remain; the next run resumes where it left off.)"),
+    # log / progress / notifications
+    "log_cookie_imported": ("Cookie を取り込みました（{n} 件）。以後この元ファイルは不要です → {path}",
+                            "Imported cookies ({n} entries). You no longer need the original file → {path}"),
+    "log_cookie_cleared": ("保存済みの Cookie を削除しました。", "Deleted the saved cookies."),
+    "log_config_saved": ("設定を保存しました: {path}", "Settings saved: {path}"),
+    "log_done": ("完了: 対象 {total} / {summary}", "Done: {total} items / {summary}"),
+    "log_error": ("エラー: {e}", "Error: {e}"),
+    "summary_fmt": ("新規 {inserted} / 重複 {skipped} / 失敗 {failed}",
+                    "New {inserted} / Dup {skipped} / Failed {failed}"),
+    "sync_err_cookies": ("cookies.txt が取り込まれていません。「取り込み…」から取り込んでください。",
+                         "cookies.txt hasn't been imported. Import it from “Import…”."),
+    "prog_done": ("完了", "Done"),
+    "prog_error": ("エラー", "Error"),
+    "notif_done_title": ("Booklight 同期完了", "Booklight — Sync complete"),
+    "notif_err_title": ("Booklight 同期エラー", "Booklight — Sync error"),
+}
+
+
+# ---- Theme (canonical values stored in config; labels are localized) ---------
+THEME_VALUES = ("system", "light", "dark")
+_LEGACY_THEME = {"システム": "system", "ライト": "light", "ダーク": "dark"}
+
+
+def theme_label(value):
+    return t("theme_" + value)
+
+
+def theme_value(label):
+    for v in THEME_VALUES:
+        if theme_label(v) == label:
+            return v
+    return "system"
+
+
+def normalize_theme(saved):
+    v = _LEGACY_THEME.get(saved, saved)
+    return v if v in THEME_VALUES else "system"
+
+
+# ---- Language preference (Settings selector) ---------------------------------
+LANG_PREFS = ("auto", "ja", "en")
+
+
+def langpref_label(pref):
+    return {"auto": t("lang_auto"), "ja": "日本語", "en": "English"}.get(pref, t("lang_auto"))
+
+
+def langpref_value(label):
+    for p in LANG_PREFS:
+        if langpref_label(p) == label:
+            return p
+    return "auto"
 
 # External help links opened from the help window (取得方法).
 NOTION_INTEGRATIONS_URL = "https://www.notion.so/my-integrations"
@@ -325,7 +527,7 @@ class SettingsDialog(_TitlebarMixin, ctk.CTkToplevel):
             "notify": app.notify_on_complete.get(),
             "appearance": app.appearance_mode.get(),
         }
-        self.title("設定")
+        self.title(t("settings_title"))
         self.geometry("560x780")
         self.minsize(480, 660)
         self.transient(app.root)
@@ -350,41 +552,41 @@ class SettingsDialog(_TitlebarMixin, ctk.CTkToplevel):
         card = ctk.CTkFrame(outer, corner_radius=12, border_width=1)
         card.grid(row=1, column=0, sticky="ew", pady=(12, 0))
         card.columnconfigure(1, weight=1)
-        ctk.CTkLabel(card, text="Notion 接続情報", font=app.f_section, anchor="w").grid(
+        ctk.CTkLabel(card, text=t("notion_conn"), font=app.f_section, anchor="w").grid(
             row=0, column=0, columnspan=3, sticky="w", padx=16, pady=(14, 4))
 
-        ctk.CTkLabel(card, text="Notion トークン", font=app.f_body, anchor="w").grid(
+        ctk.CTkLabel(card, text=t("notion_token"), font=app.f_body, anchor="w").grid(
             row=1, column=0, sticky="w", padx=(16, 8), pady=6)
         self.token_entry = ctk.CTkEntry(
             card, textvariable=app.token, font=app.f_mono,
             show="" if app.show_token.get() else "•")
         self.token_entry.grid(row=1, column=1, sticky="ew", padx=(0, 8), pady=6)
-        ctk.CTkCheckBox(card, text="表示", variable=app.show_token, width=52,
+        ctk.CTkCheckBox(card, text=t("show"), variable=app.show_token, width=52,
                         command=self._toggle_token, font=app.f_small,
                         fg_color=ACCENT, hover_color=ACCENT_HOVER,
                         checkmark_color=ON_ACCENT).grid(
             row=1, column=2, sticky="w", padx=(0, 16), pady=6)
 
-        ctk.CTkLabel(card, text="親ページ URL", font=app.f_body, anchor="w").grid(
+        ctk.CTkLabel(card, text=t("parent_url"), font=app.f_body, anchor="w").grid(
             row=2, column=0, sticky="w", padx=(16, 8), pady=6)
         ctk.CTkEntry(card, textvariable=app.parent, font=app.f_mono).grid(
             row=2, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=6)
 
-        ctk.CTkLabel(card, text="DB ID（任意）", font=app.f_body, anchor="w").grid(
+        ctk.CTkLabel(card, text=t("db_id_optional"), font=app.f_body, anchor="w").grid(
             row=3, column=0, sticky="w", padx=(16, 8), pady=6)
         ctk.CTkEntry(card, textvariable=app.dbid, font=app.f_mono).grid(
             row=3, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=(6, 2))
         ctk.CTkLabel(
             card, font=app.f_small, text_color=MUTED, anchor="w", justify="left",
             wraplength=380,
-            text="空欄のまま同期すると、新しいデータベースを自動作成します。",
+            text=t("db_id_hint"),
         ).grid(row=4, column=1, columnspan=2, sticky="w", padx=(0, 16), pady=(0, 16))
 
         # --- card: Kindle 接続情報 (cookie management) — top of the dialog ---
         c2 = ctk.CTkFrame(outer, corner_radius=12, border_width=1)
         c2.grid(row=0, column=0, sticky="ew")
         c2.columnconfigure(0, weight=1)
-        ctk.CTkLabel(c2, text="Kindle 接続情報", font=app.f_section, anchor="w").grid(
+        ctk.CTkLabel(c2, text=t("kindle_conn"), font=app.f_section, anchor="w").grid(
             row=0, column=0, sticky="w", padx=16, pady=(14, 4))
         ctk.CTkLabel(c2, text="cookies.txt", font=app.f_body, anchor="w").grid(
             row=1, column=0, sticky="w", padx=16, pady=(0, 4))
@@ -393,11 +595,11 @@ class SettingsDialog(_TitlebarMixin, ctk.CTkToplevel):
         ff.columnconfigure(0, weight=1)
         ctk.CTkLabel(ff, textvariable=app.cookies_status, font=app.f_small,
                      text_color=MUTED, anchor="w").grid(row=0, column=0, sticky="w")
-        self.cookies_check_btn = app._ghost(ff, "接続確認", app._check_cookies, width=88)
+        self.cookies_check_btn = app._ghost(ff, t("btn_check"), app._check_cookies, width=88)
         self.cookies_check_btn.grid(row=0, column=1, padx=(8, 0))
-        app._ghost(ff, "取り込み…", app._import_cookies, width=104).grid(
+        app._ghost(ff, t("btn_import"), app._import_cookies, width=104).grid(
             row=0, column=2, padx=(8, 0))
-        self.cookies_clear_btn = app._ghost(ff, "クリア", app._clear_cookies, width=72)
+        self.cookies_clear_btn = app._ghost(ff, t("btn_clear"), app._clear_cookies, width=72)
         self.cookies_clear_btn.grid(row=0, column=3, padx=(8, 0))
         self.valid_lbl = ctk.CTkLabel(ff, textvariable=app.cookies_valid,
                                       font=app.f_small, text_color=MUTED, anchor="w")
@@ -405,29 +607,43 @@ class SettingsDialog(_TitlebarMixin, ctk.CTkToplevel):
         app._register_validity_label(self.valid_lbl)
         self.refresh_cookie_buttons(core.has_saved_cookies())
 
-        # --- card: 外観 (theme) ---
+        # --- card: 外観 / 言語 (appearance + language) ---
         c3 = ctk.CTkFrame(outer, corner_radius=12, border_width=1)
         c3.grid(row=2, column=0, sticky="ew", pady=(12, 0))
         c3.columnconfigure(1, weight=1)
-        ctk.CTkLabel(c3, text="外観", font=app.f_section, anchor="w").grid(
+        ctk.CTkLabel(c3, text=t("appearance"), font=app.f_section, anchor="w").grid(
             row=0, column=0, columnspan=2, sticky="w", padx=16, pady=(14, 4))
-        ctk.CTkLabel(c3, text="テーマ", font=app.f_body, anchor="w").grid(
-            row=1, column=0, sticky="w", padx=(16, 8), pady=(0, 14))
+        ctk.CTkLabel(c3, text=t("theme"), font=app.f_body, anchor="w").grid(
+            row=1, column=0, sticky="w", padx=(16, 8), pady=(0, 8))
         ctk.CTkOptionMenu(
-            c3, values=list(APPEARANCE), variable=app.appearance_mode, width=140,
+            c3, values=[theme_label(v) for v in THEME_VALUES],
+            variable=app.appearance_mode, width=160,
             font=app.f_small, dropdown_font=app.f_small,
             command=app._set_appearance, fg_color=ACCENT,
             button_color=ACCENT_HOVER, button_hover_color=ACCENT_HOVER,
             text_color=ON_ACCENT).grid(
-            row=1, column=1, sticky="w", padx=(0, 16), pady=(0, 14))
+            row=1, column=1, sticky="w", padx=(0, 16), pady=(0, 8))
+        ctk.CTkLabel(c3, text=t("language"), font=app.f_body, anchor="w").grid(
+            row=2, column=0, sticky="w", padx=(16, 8), pady=(0, 4))
+        ctk.CTkOptionMenu(
+            c3, values=[langpref_label(p) for p in LANG_PREFS],
+            variable=app.ui_language, width=160,
+            font=app.f_small, dropdown_font=app.f_small,
+            fg_color=ACCENT, button_color=ACCENT_HOVER,
+            button_hover_color=ACCENT_HOVER, text_color=ON_ACCENT).grid(
+            row=2, column=1, sticky="w", padx=(0, 16), pady=(0, 4))
+        ctk.CTkLabel(c3, text=t("lang_restart_note"), font=app.f_small,
+                     text_color=MUTED, anchor="w", justify="left",
+                     wraplength=380).grid(
+            row=3, column=0, columnspan=2, sticky="w", padx=16, pady=(0, 14))
 
         # --- card: 通知 ---
         c4 = ctk.CTkFrame(outer, corner_radius=12, border_width=1)
         c4.grid(row=3, column=0, sticky="ew", pady=(12, 0))
         c4.columnconfigure(0, weight=1)
-        ctk.CTkLabel(c4, text="通知", font=app.f_section, anchor="w").grid(
+        ctk.CTkLabel(c4, text=t("notifications"), font=app.f_section, anchor="w").grid(
             row=0, column=0, sticky="w", padx=16, pady=(14, 4))
-        ctk.CTkCheckBox(c4, text="同期完了時にデスクトップ通知を出す",
+        ctk.CTkCheckBox(c4, text=t("notify_toggle"),
                         variable=app.notify_on_complete, font=app.f_body,
                         fg_color=ACCENT, hover_color=ACCENT_HOVER,
                         checkmark_color=ON_ACCENT).grid(
@@ -436,10 +652,10 @@ class SettingsDialog(_TitlebarMixin, ctk.CTkToplevel):
         br = ctk.CTkFrame(outer, fg_color="transparent")
         br.grid(row=4, column=0, sticky="ew", pady=(14, 0))
         br.columnconfigure(0, weight=1)
-        help_btn = app._ghost(br, "❓ 取得方法", self._open_help)
+        help_btn = app._ghost(br, t("btn_help"), self._open_help)
         help_btn.configure(height=38)
         help_btn.grid(row=0, column=0, sticky="w")
-        save_btn = app._accent(br, "保存して閉じる", self._save_close)
+        save_btn = app._accent(br, t("btn_save_close"), self._save_close)
         save_btn.configure(height=38)
         save_btn.grid(row=0, column=1, sticky="e")
 
@@ -496,7 +712,7 @@ class HelpDialog(_TitlebarMixin, ctk.CTkToplevel):
     def __init__(self, app, parent=None):
         super().__init__(parent or app.root)
         self.app = app
-        self.title("取得方法 / ヘルプ")
+        self.title(t("help_title"))
         self.geometry("620x720")
         self.minsize(520, 480)
         self.transient(parent or app.root)
@@ -546,63 +762,45 @@ class HelpDialog(_TitlebarMixin, ctk.CTkToplevel):
 
         ctk.CTkLabel(
             wrap, font=app.f_small, text_color=MUTED, anchor="w", justify="left",
-            wraplength=500,
-            text=("同期には ① Notion トークン ② 親ページ URL ③（任意）DB ID "
-                  "④ cookies.txt が必要です。入力は「⚙ 設定」で行います。")).pack(
-            fill="x", pady=(0, 12))
+            wraplength=500, text=t("help_intro")).pack(fill="x", pady=(0, 12))
 
-        # ① Notion トークン
-        b = self._section(wrap, "① Notion トークンの取得")
-        self._step(b, "1. 下のリンクから「マイインテグレーション」を開きます。")
-        self._link(b, "🔗 notion.so/my-integrations を開く", NOTION_INTEGRATIONS_URL)
-        self._step(b, "2. 「新しいインテグレーション」を作成します（種類は内部/Internal）。")
-        self._step(b, "3. 表示された「Internal Integration Token」（ntn_… または "
-                      "secret_… で始まる文字列）をコピーします。")
-        self._step(b, "4. 「⚙ 設定」の「Notion トークン」欄に貼り付けます。")
-        self._note(b, "⚠ トークンを作っただけでは書き込めません。②の親ページに、この "
-                      "インテグレーションを「連携」から追加してください（忘れると 404 エラー）。")
+        # ① Notion token
+        b = self._section(wrap, t("help1_title"))
+        self._step(b, t("help1_s1"))
+        self._link(b, t("help1_l1"), NOTION_INTEGRATIONS_URL)
+        self._step(b, t("help1_s2"))
+        self._step(b, t("help1_s3"))
+        self._step(b, t("help1_s4"))
+        self._note(b, t("help1_note"))
 
-        # ② 親ページ URL
-        b = self._section(wrap, "② 親ページ URL の取得と連携")
-        self._step(b, "1. データベースを置きたい Notion のページを開きます"
-                      "（新しい空ページを作ってもOK）。")
-        self._link(b, "🔗 Notion を開く", "https://www.notion.so")
-        self._step(b, "2. そのページの URL をコピーし、「⚙ 設定」の「親ページ URL」欄に"
-                      "貼り付けます。")
-        self._step(b, "3. ページ右上の「•••」→「連携（コネクト）」→ ①で作った"
-                      "インテグレーションを追加します。")
-        self._note(b, "この「連携」を忘れると、トークンが正しくても 404 で失敗します。")
+        # ② Parent page URL
+        b = self._section(wrap, t("help2_title"))
+        self._step(b, t("help2_s1"))
+        self._link(b, t("help2_l1"), "https://www.notion.so")
+        self._step(b, t("help2_s2"))
+        self._step(b, t("help2_s3"))
+        self._note(b, t("help2_note"))
 
-        # ③ データベース ID
-        b = self._section(wrap, "③ データベース ID（任意）")
-        self._step(b, "空欄のまま同期すると、新しいデータベースを自動作成します。"
-                      "通常は空欄でOKです。")
-        self._step(b, "既存のデータベースに追記したい場合のみ、その DB を Notion の"
-                      "ブラウザで開きます。")
-        self._step(b, "URL「notion.so/…/xxxxxxxx?v=…」の xxxxxxxx（32 桁の英数字）が "
-                      "DB ID です。これを「⚙ 設定」の「DB ID」欄に貼り付けます。")
-        self._note(b, "最後のスラッシュの後ろ・「?v=」より前が DB ID です"
-                      "（末尾のページ名部分は無視されます）。")
+        # ③ Database ID
+        b = self._section(wrap, t("help3_title"))
+        self._step(b, t("help3_s1"))
+        self._step(b, t("help3_s2"))
+        self._step(b, t("help3_s3"))
+        self._note(b, t("help3_note"))
 
         # ④ cookies.txt
-        b = self._section(wrap, "④ cookies.txt の取得")
-        self._step(b, "1. ブラウザで read.amazon.co.jp にログインしておきます。")
-        self._link(b, "🔗 read.amazon.co.jp/notebook を開く", AMAZON_NOTEBOOK_URL)
-        self._step(b, "2. Cookie 書き出し用の拡張機能を入れます"
-                      "（例:「Get cookies.txt LOCALLY」）。")
-        self._link(b, "🔗 Chrome ウェブストアで「get cookies.txt」を検索",
-                   COOKIES_EXT_SEARCH_URL)
-        self._step(b, "3. read.amazon.co.jp を開いた状態で拡張機能を起動し、cookies.txt "
-                      "をエクスポート（Export／Download）します。")
-        self._step(b, "4. 「⚙ 設定」の「Kindle 接続情報」→「取り込み…」から、その "
-                      "cookies.txt を選びます。")
-        self._note(b, "取り込み後は元ファイル不要です。「✕ 期限切れ」と表示されたら、"
-                      "ログインし直して cookies.txt を取り直し、もう一度「取り込み…」して"
-                      "ください。")
+        b = self._section(wrap, t("help4_title"))
+        self._step(b, t("help4_s1"))
+        self._link(b, t("help4_l1"), AMAZON_NOTEBOOK_URL)
+        self._step(b, t("help4_s2"))
+        self._link(b, t("help4_l2"), COOKIES_EXT_SEARCH_URL)
+        self._step(b, t("help4_s3"))
+        self._step(b, t("help4_s4"))
+        self._note(b, t("help4_note"))
 
         br = ctk.CTkFrame(self, fg_color="transparent")
         br.pack(fill="x", padx=16, pady=(0, 14))
-        close = app._accent(br, "閉じる", self._close)
+        close = app._accent(br, t("btn_close"), self._close)
         close.configure(width=100, height=36)
         close.pack(side="right")
 
@@ -616,6 +814,8 @@ class App:
         root.minsize(640, 340)
         self._set_window_icon()
         cfg = core.load_config()
+        set_language(cfg.get("ui_language", "auto"))  # before any t() in the UI
+        core.set_language(LANG)  # the engine's runtime messages follow the same language
         self._indeterminate = False
         self._syncing = False
         self._notify_pref = True  # snapshot taken on the main thread at sync start
@@ -627,13 +827,14 @@ class App:
         # Desktop-notification preference (settings dialog toggle); default on.
         self.notify_on_complete = tk.BooleanVar(
             value=bool(cfg.get("notify_on_complete", True)))
-        # Theme choice lives in the settings dialog; persisted in config and
-        # restored here so it survives a restart.
-        saved_theme = cfg.get("appearance_mode", "システム")
-        if saved_theme not in APPEARANCE:
-            saved_theme = "システム"
-        self.appearance_mode = tk.StringVar(value=saved_theme)
-        ctk.set_appearance_mode(APPEARANCE[saved_theme])
+        # Theme + language choices live in the settings dialog; persisted in
+        # config and restored here. Theme is stored canonically (system/light/
+        # dark); the StringVar holds the localized label shown in the menu.
+        saved_theme = normalize_theme(cfg.get("appearance_mode", "system"))
+        self.appearance_mode = tk.StringVar(value=theme_label(saved_theme))
+        ctk.set_appearance_mode(saved_theme)
+        self.ui_language = tk.StringVar(
+            value=langpref_label(cfg.get("ui_language", "auto")))
         self.cookies_status = tk.StringVar(value="")
         self.cookies_valid = tk.StringVar(value="")
         # Notion connection status, shown on the right of the main window and
@@ -833,13 +1034,13 @@ class App:
         if self._header_icon is not None:
             ctk.CTkLabel(titles, text="", image=self._header_icon).pack(
                 side="left", padx=(0, 12))
-        ctk.CTkLabel(titles, text="Kindle のハイライトを Notion に同期します",
+        ctk.CTkLabel(titles, text=t("app_subtitle"),
                      font=self.f_sub, text_color=MUTED, anchor="w").pack(side="left")
 
         # --- settings-incomplete banner (row 1); hidden once token + URL are set ---
         self.warn = ctk.CTkLabel(
             self.outer, font=self.f_small, text_color=BAD_COLOR, anchor="w",
-            text="⚠ トークンと親ページ URL が未設定です。「⚙ 設定」から入力してください。")
+            text=t("warn_incomplete"))
         self.warn.grid(row=1, column=0, sticky="w", pady=(0, 10))
 
         # --- card: 接続状態 — Kindle (left) / Notion (right), both probed at
@@ -888,9 +1089,9 @@ class App:
         ar = ctk.CTkFrame(self.outer, fg_color="transparent")
         ar.grid(row=3, column=0, sticky="ew", pady=(0, 12))
         ar.columnconfigure(1, weight=1)
-        self._ghost(ar, "⚙ 設定", self.open_settings, width=120).grid(
+        self._ghost(ar, t("btn_settings"), self.open_settings, width=120).grid(
             row=0, column=0, sticky="w")
-        self.sync_btn = self._accent(ar, "Notion へ同期", self.sync)
+        self.sync_btn = self._accent(ar, t("btn_sync"), self.sync)
         self.sync_btn.configure(width=168, height=40)
         self.sync_btn.grid(row=0, column=2, sticky="e")
 
@@ -912,7 +1113,7 @@ class App:
         lc.rowconfigure(1, weight=1)
         self._log_open = False
         self.log_toggle = ctk.CTkButton(
-            lc, text="▸ ログ", command=self._toggle_log, font=self.f_section,
+            lc, text="▸ " + t("log_label"), command=self._toggle_log, font=self.f_section,
             anchor="w", height=32, corner_radius=8, fg_color="transparent",
             text_color=TEXT, hover_color=SUB)
         self.log_toggle.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
@@ -927,8 +1128,8 @@ class App:
         if core.has_saved_cookies():
             self.root.after(400, lambda: self._check_cookies(silent=True))
         # Same for Notion: show the token's presence immediately, then probe it.
-        self.notion_setup.set("アカウント情報設定済み" if self.token.get().strip()
-                              else "アカウント情報未設定")
+        self.notion_setup.set(t("acct_set") if self.token.get().strip()
+                              else t("acct_unset"))
         self.root.after(400, self._check_notion)
 
         # Gate the sync button on the required settings (token + parent URL),
@@ -957,9 +1158,9 @@ class App:
         """Show whether cookies are saved; refresh the dialog buttons if it's open."""
         saved = core.has_saved_cookies()
         if saved:
-            self.cookies_status.set("アカウント情報設定済み")
+            self.cookies_status.set(t("acct_set"))
         else:
-            self.cookies_status.set("アカウント情報未設定")
+            self.cookies_status.set(t("acct_unset"))
             self._set_validity("", MUTED)  # no cookies → nothing to validate
         win = self._settings_win
         if win is not None and win.winfo_exists():
@@ -992,26 +1193,26 @@ class App:
         """
         if not core.has_saved_cookies():
             if not silent:
-                messagebox.showinfo("接続確認", "先に cookies.txt を取り込んでください。")
+                messagebox.showinfo(t("mb_check_title"), t("mb_import_first"))
             return
         self._set_check_btn_state("disabled")
-        self._set_validity("確認中…", MUTED)
+        self._set_validity(t("checking"), MUTED)
         threading.Thread(target=self._run_check, daemon=True).start()
 
     def _run_check(self):
         try:
             ok = core.check_cookies(str(core.get_cookies_path()), log=lambda *_: None)
             if ok:
-                self.root.after(0, self._set_validity, "✓ 接続OK", OK_COLOR)
+                self.root.after(0, self._set_validity, t("conn_ok"), OK_COLOR)
             else:
                 self.root.after(
                     0, self._set_validity,
-                    "✕ 期限切れ — 設定の「取り込み…」から新しい cookies.txt を入れ直してください",
+                    t("cookies_expired"),
                     BAD_COLOR)
         except Exception:
             self.root.after(
                 0, self._set_validity,
-                "接続を確認できませんでした（ネットワーク未接続など）", MUTED)
+                t("conn_failed"), MUTED)
         finally:
             self.root.after(0, self._set_check_btn_state, "normal")
 
@@ -1032,11 +1233,11 @@ class App:
         With no token there is nothing to probe, so just show 未設定.
         """
         token = self.token.get().strip()
-        self.notion_setup.set("アカウント情報設定済み" if token else "アカウント情報未設定")
+        self.notion_setup.set(t("acct_set") if token else t("acct_unset"))
         if not token:
             self._set_notion_validity("", MUTED)
             return
-        self._set_notion_validity("確認中…", MUTED)
+        self._set_notion_validity(t("checking"), MUTED)
         threading.Thread(
             target=self._run_notion_check, args=(token,), daemon=True).start()
 
@@ -1044,22 +1245,22 @@ class App:
         try:
             ok = core.check_notion(token)
             if ok:
-                self.root.after(0, self._set_notion_validity, "✓ 接続OK", OK_COLOR)
+                self.root.after(0, self._set_notion_validity, t("conn_ok"), OK_COLOR)
             else:
                 self.root.after(
                     0, self._set_notion_validity,
-                    "✕ トークンが無効です — 設定で確認してください", BAD_COLOR)
+                    t("token_invalid"), BAD_COLOR)
         except Exception:
             self.root.after(
                 0, self._set_notion_validity,
-                "接続を確認できませんでした（ネットワーク未接続など）", MUTED)
+                t("conn_failed"), MUTED)
 
     def _set_appearance(self, choice):
         self.appearance_mode.set(choice)
-        # Live preview only — persisted on "保存して閉じる", reverted on cancel.
-        # SettingsDialog overrides the title-bar recolor so switching the theme
-        # no longer withdraws the open dialog.
-        ctk.set_appearance_mode(APPEARANCE.get(choice, "system"))
+        # Live preview only — persisted on save, reverted on cancel. SettingsDialog
+        # overrides the title-bar recolor so switching the theme no longer
+        # withdraws the open dialog. `choice` is a localized label; map it back.
+        ctk.set_appearance_mode(theme_value(choice))
 
     def _settings_ready(self) -> bool:
         """Token and parent-page URL are the two required settings; DB ID is optional."""
@@ -1119,8 +1320,8 @@ class App:
     def _import_cookies(self):
         """Read a cookies.txt and store it as app data; the original is then unneeded."""
         p = filedialog.askopenfilename(
-            title="cookies.txt を取り込む",
-            filetypes=[("cookies.txt", "*.txt"), ("すべて", "*.*")],
+            title=t("filedlg_import_title"),
+            filetypes=[("cookies.txt", "*.txt"), (t("filedlg_all"), "*.*")],
         )
         if not p:
             return
@@ -1128,22 +1329,21 @@ class App:
             n = core.import_cookies_file(p)
         except Exception as e:
             messagebox.showerror(
-                "取り込みエラー", f"cookies.txt を読み込めませんでした:\n{e}")
+                t("mb_import_err_title"), t("mb_import_err").format(e=e))
             return
         self._refresh_cookie_status()
-        self.log(f"Cookie を取り込みました（{n} 件）。以後この元ファイルは不要です → "
-                 f"{core.get_cookies_path()}")
+        self.log(t("log_cookie_imported").format(n=n, path=core.get_cookies_path()))
         self._check_cookies(silent=True)  # confirm the fresh cookies actually work
 
     def _clear_cookies(self):
         """Delete the app's saved cookies."""
         if not core.has_saved_cookies():
             return
-        if not messagebox.askyesno("確認", "保存済みの Kindle 接続情報を削除しますか？"):
+        if not messagebox.askyesno(t("mb_confirm_title"), t("mb_clear_confirm")):
             return
         core.clear_saved_cookies()
         self._refresh_cookie_status()
-        self.log("保存済みの Cookie を削除しました。")
+        self.log(t("log_cookie_cleared"))
 
     def _logical_wh(self):
         """Current window (width, height) in logical px (geometry() is scaled back)."""
@@ -1167,14 +1367,14 @@ class App:
         self._log_open = not self._log_open
         if self._log_open:
             self.logbox.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 16))
-            self.log_toggle.configure(text="▾ ログ")
+            self.log_toggle.configure(text="▾ " + t("log_label"))
             self.outer.rowconfigure(5, weight=1)  # fill remaining space
             w, _ = self._logical_wh()
             self.root.geometry(f"{w}x{self._expanded_h}")  # restore expanded height
         else:
             self._expanded_h = self._logical_wh()[1]  # remember it for next expand
             self.logbox.grid_remove()
-            self.log_toggle.configure(text="▸ ログ")
+            self.log_toggle.configure(text="▸ " + t("log_label"))
             self.outer.rowconfigure(5, weight=0)  # shrink to just the header
             self._fit_height_to_content()
 
@@ -1227,12 +1427,13 @@ class App:
             "notion_parent_page_id": self.parent.get().strip(),
             "notion_database_id": self.dbid.get().strip(),
             "notify_on_complete": bool(self.notify_on_complete.get()),
-            "appearance_mode": self.appearance_mode.get(),
+            "appearance_mode": theme_value(self.appearance_mode.get()),
+            "ui_language": langpref_value(self.ui_language.get()),
         }
 
     def save(self):
         core.save_config(self._cfg_from_fields())
-        self.log("設定を保存しました: " + str(core.get_config_path()))
+        self.log(t("log_config_saved").format(path=core.get_config_path()))
 
     def sync(self):
         if not self._settings_ready():
@@ -1250,24 +1451,23 @@ class App:
         try:
             cfg = self._cfg_from_fields()
             if not core.has_saved_cookies():
-                raise RuntimeError(
-                    "cookies.txt が取り込まれていません。「取り込み…」から取り込んでください。")
+                raise RuntimeError(t("sync_err_cookies"))
             cookies_file = str(core.get_cookies_path())
             res = core.run_sync(
                 cfg, cookies_file, None, log=self.log, progress=self.on_progress
             )
             self.root.after(0, lambda: self.dbid.set(cfg.get("notion_database_id", "")))
-            summary = (f"新規 {res['inserted']} / 重複 {res['skipped']} / "
-                       f"失敗 {res['failed']}")
-            self.log(f"完了: 対象 {res['total']} / " + summary)
-            self.root.after(0, self._finish_progress, "完了")
+            summary = t("summary_fmt").format(
+                inserted=res["inserted"], skipped=res["skipped"], failed=res["failed"])
+            self.log(t("log_done").format(total=res["total"], summary=summary))
+            self.root.after(0, self._finish_progress, t("prog_done"))
             if self._notify_pref:
-                desktop_notify("Booklight 同期完了", summary)
+                desktop_notify(t("notif_done_title"), summary)
         except Exception as e:
-            self.log("エラー: " + str(e))
-            self.root.after(0, self._finish_progress, "エラー")
+            self.log(t("log_error").format(e=e))
+            self.root.after(0, self._finish_progress, t("prog_error"))
             if self._notify_pref:
-                desktop_notify("Booklight 同期エラー", str(e))
+                desktop_notify(t("notif_err_title"), str(e))
         finally:
             self._syncing = False
             self.root.after(0, self._update_ready_state)
@@ -1276,9 +1476,7 @@ class App:
         """Confirm before quitting mid-sync; a normal close just exits."""
         if self._syncing:
             if not messagebox.askyesno(
-                "同期中",
-                "同期を実行中です。中断して終了しますか？\n"
-                "（登録済みの分は残り、次回の実行で続きから再開できます）"):
+                    t("mb_syncing_title"), t("mb_quit_confirm")):
                 return
         self.root.destroy()
 

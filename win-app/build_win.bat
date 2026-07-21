@@ -19,6 +19,7 @@ echo == exe をビルド中 (数分かかります) ==
   --collect-all certifi ^
   --collect-all customtkinter ^
   --collect-all darkdetect ^
+  --collect-all winotify ^
   "%APP%\gui.py"
 
 echo.

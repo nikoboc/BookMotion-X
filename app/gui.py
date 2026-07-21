@@ -4,6 +4,7 @@
 Enter your Notion token / parent page / cookies right in the window — no file
 editing. Values are saved to config.json (Application Support when packaged).
 """
+import subprocess
 import sys
 import threading
 import tkinter as tk
@@ -151,6 +152,29 @@ def _resolve_mono(root):
         return "Courier"
 
 
+def desktop_notify(title: str, message: str) -> None:
+    """Show a native desktop notification. Best-effort — never raises.
+
+    macOS uses the built-in `osascript` (no dependency); Windows uses the
+    lightweight `winotify` package (Windows-only, see requirements.txt). On any
+    other platform, or if the tool/library is unavailable, it's a silent no-op.
+    Safe to call from a worker thread — it touches no Tk state.
+    """
+    try:
+        if sys.platform == "darwin":
+            def esc(s):
+                return s.replace("\\", "\\\\").replace('"', '\\"')
+            subprocess.run(
+                ["osascript", "-e",
+                 f'display notification "{esc(message)}" with title "{esc(title)}"'],
+                check=False, capture_output=True, timeout=5)
+        elif sys.platform.startswith("win"):
+            from winotify import Notification
+            Notification(app_id="Kindle → Notion", title=title, msg=message).show()
+    except Exception:
+        pass
+
+
 class SettingsDialog(ctk.CTkToplevel):
     """Modal dialog for the rarely-changed Notion settings (token / URL / DB ID).
 
@@ -162,8 +186,8 @@ class SettingsDialog(ctk.CTkToplevel):
         super().__init__(app.root)
         self.app = app
         self.title("設定")
-        self.geometry("560x700")
-        self.minsize(480, 600)
+        self.geometry("560x780")
+        self.minsize(480, 660)
         self.transient(app.root)
         self.protocol("WM_DELETE_WINDOW", self._close)
         self._build()
@@ -255,8 +279,18 @@ class SettingsDialog(ctk.CTkToplevel):
             button_color=ACCENT, button_hover_color=ACCENT_HOVER).grid(
             row=1, column=1, sticky="w", padx=(0, 16), pady=(0, 14))
 
+        # --- card: 通知 ---
+        c4 = ctk.CTkFrame(outer, corner_radius=12)
+        c4.grid(row=3, column=0, sticky="ew", pady=(12, 0))
+        c4.columnconfigure(0, weight=1)
+        ctk.CTkLabel(c4, text="通知", font=app.f_section, anchor="w").grid(
+            row=0, column=0, sticky="w", padx=16, pady=(14, 4))
+        ctk.CTkCheckBox(c4, text="同期完了時にデスクトップ通知を出す",
+                        variable=app.notify_on_complete, font=app.f_body).grid(
+            row=1, column=0, sticky="w", padx=16, pady=(0, 14))
+
         br = ctk.CTkFrame(outer, fg_color="transparent")
-        br.grid(row=3, column=0, sticky="ew", pady=(14, 0))
+        br.grid(row=4, column=0, sticky="ew", pady=(14, 0))
         br.columnconfigure(0, weight=1)
         save_btn = app._accent(br, "保存して閉じる", self._save_close)
         save_btn.configure(height=38)
@@ -298,10 +332,14 @@ class App:
         cfg = core.load_config()
         self._indeterminate = False
         self._syncing = False
+        self._notify_pref = True  # snapshot taken on the main thread at sync start
 
         self.token = tk.StringVar(value=cfg.get("notion_token", ""))
         self.parent = tk.StringVar(value=cfg.get("notion_parent_page_id", ""))
         self.dbid = tk.StringVar(value=cfg.get("notion_database_id", ""))
+        # Desktop-notification preference (settings dialog toggle); default on.
+        self.notify_on_complete = tk.BooleanVar(
+            value=bool(cfg.get("notify_on_complete", True)))
         # Theme choice lives in the settings dialog; keep it here so the dialog's
         # dropdown reflects the current selection each time it opens.
         self.appearance_mode = tk.StringVar(value="システム")
@@ -653,6 +691,7 @@ class App:
             "notion_token": self.token.get().strip(),
             "notion_parent_page_id": self.parent.get().strip(),
             "notion_database_id": self.dbid.get().strip(),
+            "notify_on_complete": bool(self.notify_on_complete.get()),
         }
 
     def save(self):
@@ -665,6 +704,8 @@ class App:
             return
         self.save()
         self._syncing = True
+        # Snapshot the preference on the main thread; the worker reads this bool.
+        self._notify_pref = bool(self.notify_on_complete.get())
         self.sync_btn.configure(state="disabled")
         self._reset_progress()
         threading.Thread(target=self._run, daemon=True).start()
@@ -680,14 +721,17 @@ class App:
                 cfg, cookies_file, None, log=self.log, progress=self.on_progress
             )
             self.root.after(0, lambda: self.dbid.set(cfg.get("notion_database_id", "")))
-            self.log(
-                f"完了: 対象 {res['total']} / 新規 {res['inserted']} / "
-                f"重複 {res['skipped']} / 失敗 {res['failed']}"
-            )
+            summary = (f"新規 {res['inserted']} / 重複 {res['skipped']} / "
+                       f"失敗 {res['failed']}")
+            self.log(f"完了: 対象 {res['total']} / " + summary)
             self.root.after(0, self._finish_progress, "完了")
+            if self._notify_pref:
+                desktop_notify("Kindle → Notion 同期完了", summary)
         except Exception as e:
             self.log("エラー: " + str(e))
             self.root.after(0, self._finish_progress, "エラー")
+            if self._notify_pref:
+                desktop_notify("Kindle → Notion 同期エラー", str(e))
         finally:
             self._syncing = False
             self.root.after(0, self._update_ready_state)

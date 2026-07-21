@@ -380,7 +380,9 @@ class App:
         self.outer = ctk.CTkFrame(self.root, fg_color="transparent")
         self.outer.pack(fill="both", expand=True, padx=20, pady=18)
         self.outer.columnconfigure(0, weight=1)
-        self.outer.rowconfigure(5, weight=1)
+        # Row 5 (log) gains weight only when the log is expanded; collapsed by
+        # default, so the extra space sits at the bottom until the user opens it.
+        self.outer.rowconfigure(5, weight=0)
 
         # --- header ---
         hdr = ctk.CTkFrame(self.outer, fg_color="transparent")
@@ -433,12 +435,20 @@ class App:
                                    anchor="w")
         self.status.grid(row=1, column=0, sticky="w", pady=(6, 0))
 
-        # --- log card ---
-        lc = self._card(5, "ログ", expand=True)
+        # --- log card (collapsible like <details>; collapsed by default) ---
+        lc = ctk.CTkFrame(self.outer, corner_radius=12)
+        lc.grid(row=5, column=0, sticky="nsew", pady=(0, 12))
+        lc.columnconfigure(0, weight=1)
         lc.rowconfigure(1, weight=1)
-        self.logbox = ctk.CTkTextbox(lc, font=self.f_log, corner_radius=8, wrap="word")
-        self.logbox.grid(row=1, column=0, columnspan=3, sticky="nsew",
-                         padx=16, pady=(0, 16))
+        self._log_open = False
+        self.log_toggle = ctk.CTkButton(
+            lc, text="▸ ログ", command=self._toggle_log, font=self.f_section,
+            anchor="w", height=32, corner_radius=8, fg_color="transparent",
+            text_color=("gray20", "gray90"), hover_color=("gray90", "gray25"))
+        self.log_toggle.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
+        self.logbox = ctk.CTkTextbox(lc, font=self.f_log, corner_radius=8,
+                                     wrap="word", height=220)
+        # The textbox stays ungridded until expanded (default: collapsed).
 
         # Reflect the saved-cookie status on the Cookie row.
         self._refresh_cookie_status()
@@ -583,10 +593,23 @@ class App:
         self._refresh_cookie_status()
         self.log("保存済みの Cookie を削除しました。")
 
+    def _toggle_log(self):
+        """Expand/collapse the log area (like a <details> element)."""
+        self._log_open = not self._log_open
+        if self._log_open:
+            self.logbox.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 16))
+            self.log_toggle.configure(text="▾ ログ")
+            self.outer.rowconfigure(5, weight=1)  # fill remaining space
+        else:
+            self.logbox.grid_remove()
+            self.log_toggle.configure(text="▸ ログ")
+            self.outer.rowconfigure(5, weight=0)  # shrink to just the header
+
     def log(self, msg):
         self.root.after(0, self._append, str(msg))
 
     def _append(self, msg):
+        # The textbox keeps buffering even while collapsed; it shows on expand.
         self.logbox.insert("end", msg + "\n")
         self.logbox.see("end")
 

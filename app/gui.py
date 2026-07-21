@@ -175,6 +175,37 @@ def desktop_notify(title: str, message: str) -> None:
         pass
 
 
+def _apply_titlebar_theme(win) -> None:
+    """Match a window's title bar to the current appearance (Windows only).
+
+    CTkToplevel sometimes leaves the title bar light in dark mode; set the DWM
+    immersive-dark-mode attribute explicitly and nudge the frame to repaint.
+    Best-effort no-op on other platforms or older Windows.
+    """
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        import ctypes
+
+        use_dark = ctypes.c_int(1 if ctk.get_appearance_mode() == "Dark" else 0)
+        hwnd = ctypes.windll.user32.GetAncestor(win.winfo_id(), 2)  # GA_ROOT
+        DWMWA_USE_IMMERSIVE_DARK_MODE = 20  # 19 on pre-20H1 Windows 10
+        if ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
+                ctypes.byref(use_dark), ctypes.sizeof(use_dark)) != 0:
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, 19, ctypes.byref(use_dark), ctypes.sizeof(use_dark))
+        # Force a non-client (title-bar) repaint WITHOUT resizing — a resize
+        # round-trip would double-apply CustomTkinter's DPI scaling and grow the
+        # window. SWP_FRAMECHANGED redraws the frame at the same size/position.
+        SWP_NOSIZE, SWP_NOMOVE, SWP_NOZORDER, SWP_FRAMECHANGED = 0x1, 0x2, 0x4, 0x20
+        ctypes.windll.user32.SetWindowPos(
+            hwnd, 0, 0, 0, 0, 0,
+            SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED)
+    except Exception:
+        pass
+
+
 class SettingsDialog(ctk.CTkToplevel):
     """Modal dialog for the rarely-changed Notion settings (token / URL / DB ID).
 
@@ -192,6 +223,8 @@ class SettingsDialog(ctk.CTkToplevel):
         self.protocol("WM_DELETE_WINDOW", self._close)
         self._build()
         self.after(10, self._grab)  # grab once the window is viewable
+        # Match the title bar to the theme, after CustomTkinter's own attempt.
+        self.after(120, lambda: _apply_titlebar_theme(self))
 
     def _grab(self):
         try:
@@ -579,6 +612,9 @@ class App:
 
     def _set_appearance(self, choice):
         ctk.set_appearance_mode(APPEARANCE.get(choice, "system"))
+        win = self._settings_win
+        if win is not None and win.winfo_exists():
+            win.after(60, lambda: _apply_titlebar_theme(win))
 
     def _settings_ready(self) -> bool:
         """Token and parent-page URL are the two required settings; DB ID is optional."""

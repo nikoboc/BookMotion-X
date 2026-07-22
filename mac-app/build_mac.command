@@ -11,7 +11,7 @@ python3 -m venv .buildvenv || { echo "python3 が必要です (xcode-select --in
 
 echo "== .appをビルド中 (数分かかります) =="
 ./.buildvenv/bin/pyinstaller --noconfirm --windowed --name "Booklight" \
-  --osx-bundle-identifier "com.local.kindlenotion" \
+  --osx-bundle-identifier "com.local.booklight" \
   --icon "$APP/icons/appicon.icns" \
   --paths "$APP" \
   --add-data "$APP/fonts:fonts" \

@@ -32,6 +32,18 @@ def test_parse_books_strips_author_prefix_both_colon_forms():
     assert books[1]["author"] == "山田太郎"
 
 
+def test_parse_books_strips_english_by_prefix():
+    html = """
+    <div class="kp-notebook-library-each-book" id="B003EN">
+      <h2 class="kp-notebook-searchable">Book Three</h2>
+      <p class="kp-notebook-searchable">By: John Smith</p>
+    </div>
+    """
+    books = k.parse_books(html)
+    # The English "By:" prefix is stripped like the Japanese "著者:" form
+    assert books[0]["author"] == "John Smith"
+
+
 def test_parse_books_empty_html():
     assert k.parse_books("<html></html>") == []
 

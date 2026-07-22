@@ -21,7 +21,7 @@ function parseLibrary(html) {
       asin,
       title: title ? title.textContent.trim() : null,
       author: author
-        ? author.textContent.trim().replace(/^著者\s*[:：]\s*/, "").trim()
+        ? author.textContent.trim().replace(/^(?:著者|by)\s*[:：]\s*/i, "").trim()
         : null,
     });
   });

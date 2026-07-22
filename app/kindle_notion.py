@@ -369,7 +369,8 @@ def parse_books(html: str) -> list:
     """Parse the notebook library sidebar into ``[{asin, title, author}, ...]``.
 
     Each book is a ``.kp-notebook-library-each-book`` div keyed by its ASIN (the
-    div id); the Japanese "著者:" / "著者：" prefix is stripped from the author.
+    div id); the "著者:" / "著者：" (JP) and "By:" (EN) prefix is stripped from
+    the author.
     """
     soup = BeautifulSoup(html, "html.parser")
     out = []
@@ -381,7 +382,7 @@ def parse_books(html: str) -> list:
         a = div.select_one("p.kp-notebook-searchable")
         author = a.get_text(strip=True) if a else None
         if author:
-            author = re.sub(r"^著者\s*[:：]\s*", "", author).strip()
+            author = re.sub(r"^(?:著者|by)\s*[:：]\s*", "", author, flags=re.IGNORECASE).strip()
         out.append(
             {
                 "asin": asin,

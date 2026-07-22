@@ -80,7 +80,7 @@ async function scrollAndCollectBooks() {
     const title = div.querySelector("h2.kp-notebook-searchable");
     const author = div.querySelector("p.kp-notebook-searchable");
     const authorText = author
-      ? author.textContent.trim().replace(/^著者\s*[:：]\s*/, "").trim()
+      ? author.textContent.trim().replace(/^(?:著者|by)\s*[:：]\s*/i, "").trim()
       : null;
     books.push({
       asin,

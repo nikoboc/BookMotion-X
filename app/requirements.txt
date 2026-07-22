@@ -5,7 +5,9 @@ customtkinter>=5.2
 # icon) needs Pillow, but some customtkinter releases don't declare it — pin it
 # explicitly so the build bundles it, otherwise the logos fall back to emoji.
 pillow>=10
-# Windows desktop notifications (macOS uses the built-in osascript, no dep).
+# Windows desktop notifications. (macOS notifies via pyobjc's NSUserNotification
+# — already pulled in by pywebview below — so its toast shows the app icon,
+# falling back to the built-in osascript; no extra Mac dependency needed.)
 winotify>=1.1 ; sys_platform == "win32"
 # In-app Kindle sign-in via an embedded browser (WebView2 on Windows, WKWebView
 # on macOS). pywebview pulls the right backend per platform: pythonnet on Windows,

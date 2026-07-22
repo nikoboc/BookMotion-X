@@ -413,25 +413,62 @@ def _resolve_mono(root):
         return "Courier"
 
 
-def desktop_notify(title: str, message: str) -> None:
-    """Show a native desktop notification. Best-effort — never raises.
+def _macos_notify(title: str, message: str) -> bool:
+    """Deliver a notification via the native NSUserNotification API.
 
-    macOS uses the built-in `osascript` (no dependency); Windows uses the
-    lightweight `winotify` package (Windows-only, see requirements.txt). On any
+    Posted from inside our own process, the notification inherits the running
+    .app bundle's identity and icon — the only way to badge a macOS notification
+    with our icon (osascript's `display notification` always shows the host
+    tool's icon, never ours). pyobjc is already a Mac dependency (via pywebview).
+    Returns True on delivery, False if unavailable — e.g. running from source
+    with no bundle id — so the caller can fall back to osascript. NSUserNotifi-
+    cation is deprecated but still delivers, and unlike UNUserNotificationCenter
+    it works for unsigned local apps. Never raises.
+    """
+    try:
+        from Foundation import NSUserNotification, NSUserNotificationCenter
+
+        center = NSUserNotificationCenter.defaultUserNotificationCenter()
+        if center is None:  # nil when the process has no bundle id (bare python)
+            return False
+        note = NSUserNotification.alloc().init()
+        note.setTitle_(title)
+        note.setInformativeText_(message)
+        center.deliverNotification_(note)
+        return True
+    except Exception:
+        return False
+
+
+def desktop_notify(title: str, message: str) -> None:
+    """Show a native desktop notification, badged with the app icon. Best-effort
+    — never raises.
+
+    macOS posts through NSUserNotification (see _macos_notify) so the toast
+    carries our .app icon, falling back to the built-in `osascript` (which
+    notifies but can't show a custom icon) when that path isn't available.
+    Windows uses the lightweight `winotify` package (Windows-only, see
+    requirements.txt), handing it appicon.png so the toast shows our icon. On any
     other platform, or if the tool/library is unavailable, it's a silent no-op.
     Safe to call from a worker thread — it touches no Tk state.
     """
     try:
         if sys.platform == "darwin":
-            def esc(s):
-                return s.replace("\\", "\\\\").replace('"', '\\"')
-            subprocess.run(
-                ["osascript", "-e",
-                 f'display notification "{esc(message)}" with title "{esc(title)}"'],
-                check=False, capture_output=True, timeout=5)
+            if not _macos_notify(title, message):
+                def esc(s):
+                    return s.replace("\\", "\\\\").replace('"', '\\"')
+                subprocess.run(
+                    ["osascript", "-e",
+                     f'display notification "{esc(message)}" with title "{esc(title)}"'],
+                    check=False, capture_output=True, timeout=5)
         elif sys.platform.startswith("win"):
             from winotify import Notification
-            Notification(app_id="Booklight", title=title, msg=message).show()
+            kwargs = {}
+            icon = _icons_dir() / "appicon.png"
+            if icon.exists():
+                kwargs["icon"] = str(icon)  # winotify requires an absolute path
+            Notification(app_id="Booklight", title=title, msg=message,
+                         **kwargs).show()
     except Exception:
         pass
 

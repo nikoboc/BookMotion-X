@@ -23,6 +23,23 @@ AUTH_COOKIES = ("at-main", "sess-at-main", "x-main", "session-token")
 POLL_SECONDS = 1.0
 TIMEOUT_SECONDS = 300
 
+# Force password/OTP sign-in by neutralising WebAuthn in the embedded browser.
+# Amazon otherwise offers a passkey, and on Windows the WebView2 auto-launches
+# Windows Hello for it — but the passkey assertion never completes the login in
+# this harvesting window, leaving the user stuck at the password step. Hiding
+# window.PublicKeyCredential makes Amazon's "is a passkey available?" probe say
+# no, and rejecting navigator.credentials.get() stops any passkey ceremony from
+# starting, so Amazon falls back to password. (A process-level WebView2 flag was
+# tried first but doesn't disable WebAuthn in this runtime; only JS injection
+# does.) Re-applied on every page load and each poll to survive navigations.
+_DISABLE_WEBAUTHN_JS = (
+    "(function(){try{Object.defineProperty(window,'PublicKeyCredential',"
+    "{value:undefined,configurable:true});}catch(e){try{window.PublicKeyCredential="
+    "undefined;}catch(_){}}try{if(navigator.credentials){navigator.credentials.get="
+    "function(){return Promise.reject(new DOMException('WebAuthn disabled in "
+    "embedded login','NotAllowedError'));};}}catch(e){}})();"
+)
+
 
 def _epoch(expires):
     """Parse a cookie ``expires`` (RFC-1123 string) to epoch seconds, or None."""
@@ -67,10 +84,19 @@ def run() -> int:
 
     state = {"saved": 0}
 
+    def disable_webauthn(window):
+        """Re-apply the passkey block (see _DISABLE_WEBAUTHN_JS). Best-effort."""
+        try:
+            window.evaluate_js(_DISABLE_WEBAUTHN_JS)
+        except Exception:
+            pass
+
     def harvest(window):
+        disable_webauthn(window)  # cover the first page immediately
         deadline = time.monotonic() + TIMEOUT_SECONDS
         while time.monotonic() < deadline and not state["saved"]:
             time.sleep(POLL_SECONDS)
+            disable_webauthn(window)  # keep it applied across each navigation
             try:
                 url = window.get_current_url() or ""
                 if "/ap/" in url or "signin" in url:
@@ -92,6 +118,12 @@ def run() -> int:
     try:
         window = webview.create_window(
             "Kindle — ログイン / Sign in", LOGIN_URL, width=520, height=760)
+        # Also inject the moment each page's DOM is ready, before the user can
+        # reach the password field and trigger a passkey.
+        try:
+            window.events.loaded += lambda *a: disable_webauthn(window)
+        except Exception:
+            pass
         webview.start(harvest, window)
     except Exception:
         return 1

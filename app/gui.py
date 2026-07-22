@@ -134,8 +134,8 @@ _TR = {
     "acct_unset": ("アカウント情報未設定", "Account not configured"),
     "conn_ok": ("✓ 接続OK", "✓ Connected"),
     "checking": ("確認中…", "Checking…"),
-    "cookies_expired": ("✕ 期限切れ — 設定の「取り込み…」から新しい cookies.txt を入れ直してください",
-                        "✕ Expired — re-import a fresh cookies.txt from “Import…” in Settings"),
+    "cookies_expired": ("✕ 期限切れ — 設定から再度サインインしてください",
+                        "✕ Expired — please sign in again in Settings"),
     "conn_failed": ("接続を確認できませんでした（ネットワーク未接続など）",
                     "Couldn't check the connection (no network, etc.)"),
     "token_invalid": ("✕ トークンが無効です — 設定で確認してください",
@@ -151,8 +151,6 @@ _TR = {
                    "Leave blank to auto-create a new database on sync."),
     "kindle_conn": ("Kindle 接続情報", "Kindle connection"),
     "btn_kindle_login": ("Kindle にログイン", "Sign in to Kindle"),
-    "cookies_fallback": ("または cookies.txt を取り込む（上級者向け）",
-                         "…or import a cookies.txt (advanced)"),
     "login_running": ("ログイン中…（開いたブラウザ窓で操作してください）",
                       "Signing in… (use the browser window that opened)"),
     "login_cancelled": ("ログインは完了しませんでした", "Sign-in didn't complete"),
@@ -179,8 +177,8 @@ _TR = {
     "btn_close": ("閉じる", "Close"),
     # help dialog
     "help_title": ("取得方法 / ヘルプ", "Setup guide / Help"),
-    "help_intro": ("同期には ① Notion トークン ② 親ページ URL ③（任意）DB ID ④ cookies.txt が必要です。入力は「⚙ 設定」で行います。",
-                   "You need ① a Notion token, ② a parent page URL, ③ (optional) a DB ID, and ④ cookies.txt. Enter them in “⚙ Settings”."),
+    "help_intro": ("同期には ① Notion トークン ② 親ページ URL ③（任意）DB ID ④ Kindle へのサインイン が必要です。設定は「⚙ 設定」で行います。",
+                   "You need ① a Notion token, ② a parent page URL, ③ (optional) a DB ID, and ④ to sign in to Kindle. Set them up in “⚙ Settings”."),
     "help1_title": ("① Notion トークンの取得", "① Get a Notion token"),
     "help1_s1": ("1. 下のリンクから「マイインテグレーション」を開きます。",
                  "1. Open “My integrations” from the link below."),
@@ -212,6 +210,11 @@ _TR = {
                  "In the URL “notion.so/…/xxxxxxxx?v=…”, the xxxxxxxx (32 hex chars) is the DB ID. Paste it into the “DB ID” field in “⚙ Settings”."),
     "help3_note": ("最後のスラッシュの後ろ・「?v=」より前が DB ID です（末尾のページ名部分は無視されます）。",
                    "The DB ID is the part after the last slash and before “?v=” (any trailing page-name part is ignored)."),
+    "help4_login_title": ("④ Kindle にサインイン", "④ Sign in to Kindle"),
+    "help4_login_s1": ("「⚙ 設定」の「Kindle にログイン」を押し、開いたウィンドウで Amazon にログインします（2要素認証もそのまま通ります）。",
+                       "In “⚙ Settings”, click “Sign in to Kindle” and log in to Amazon in the window that opens (2-factor auth works too)."),
+    "help4_login_note": ("ログインは自動で保存され、同期のたびに更新されます。cookies.txt は不要です。",
+                         "The sign-in is saved automatically and refreshed on every sync — no cookies.txt needed."),
     "help4_title": ("④ cookies.txt の取得", "④ Get cookies.txt"),
     "help4_s1": ("1. ブラウザで read.amazon.co.jp にログインしておきます。",
                  "1. Log in to read.amazon.co.jp in your browser."),
@@ -597,40 +600,39 @@ class SettingsDialog(_TitlebarMixin, ctk.CTkToplevel):
             text=t("db_id_hint"),
         ).grid(row=4, column=1, columnspan=2, sticky="w", padx=(0, 16), pady=(0, 16))
 
-        # --- card: Kindle 接続情報 — sign in (WebView2) or import a cookies.txt ---
+        # --- card: Kindle 接続情報 — sign in with the in-app browser (WebView2) ---
         c2 = ctk.CTkFrame(outer, corner_radius=12, border_width=1)
         c2.grid(row=0, column=0, sticky="ew")
         c2.columnconfigure(0, weight=1)
         ctk.CTkLabel(c2, text=t("kindle_conn"), font=app.f_section, anchor="w").grid(
             row=0, column=0, sticky="w", padx=16, pady=(14, 6))
 
-        # Primary: sign in through an in-app browser (Windows) — no cookies.txt.
-        lr = ctk.CTkFrame(c2, fg_color="transparent")
-        lr.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 2))
-        lr.columnconfigure(1, weight=1)
-        self.login_btn = app._accent(lr, t("btn_kindle_login"), app._kindle_login)
-        self.login_btn.configure(height=36)
-        self.login_btn.grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(lr, textvariable=app.cookies_status, font=app.f_small,
-                     text_color=MUTED, anchor="w").grid(
-            row=0, column=1, sticky="w", padx=(10, 0))
+        # WebView2 sign-in is Windows-only; on other platforms (macOS) cookies.txt
+        # import remains the sign-in path since there is no in-app browser there.
+        win = sys.platform.startswith("win")
+        top = ctk.CTkFrame(c2, fg_color="transparent")
+        top.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 2))
+        if win:
+            self.login_btn = app._accent(top, t("btn_kindle_login"), app._kindle_login)
+            self.login_btn.configure(height=36)
+            self.login_btn.pack(side="left", padx=(0, 10))
+        ctk.CTkLabel(top, textvariable=app.cookies_status, font=app.f_small,
+                     text_color=MUTED, anchor="w").pack(side="left")
         self.valid_lbl = ctk.CTkLabel(c2, textvariable=app.cookies_valid,
                                       font=app.f_small, text_color=MUTED, anchor="w")
         self.valid_lbl.grid(row=2, column=0, sticky="w", padx=16, pady=(2, 0))
         app._register_validity_label(self.valid_lbl)
 
-        # Fallback: import a cookies.txt manually (test / import / clear).
-        ctk.CTkLabel(c2, text=t("cookies_fallback"), font=app.f_small,
-                     text_color=MUTED, anchor="w").grid(
-            row=3, column=0, sticky="w", padx=16, pady=(10, 2))
+        # Test the current sign-in / clear it (sign out or switch account).
         ff = ctk.CTkFrame(c2, fg_color="transparent")
-        ff.grid(row=4, column=0, sticky="w", padx=16, pady=(0, 14))
+        ff.grid(row=3, column=0, sticky="w", padx=16, pady=(8, 14))
         self.cookies_check_btn = app._ghost(ff, t("btn_check"), app._check_cookies, width=88)
-        self.cookies_check_btn.grid(row=0, column=0, padx=(0, 8))
-        app._ghost(ff, t("btn_import"), app._import_cookies, width=104).grid(
-            row=0, column=1, padx=(0, 8))
+        self.cookies_check_btn.pack(side="left", padx=(0, 8))
+        if not win:  # cookies.txt import is the sign-in path where WebView2 isn't available
+            app._ghost(ff, t("btn_import"), app._import_cookies, width=104).pack(
+                side="left", padx=(0, 8))
         self.cookies_clear_btn = app._ghost(ff, t("btn_clear"), app._clear_cookies, width=72)
-        self.cookies_clear_btn.grid(row=0, column=2)
+        self.cookies_clear_btn.pack(side="left")
         self.refresh_cookie_buttons(core.has_saved_cookies())
 
         # --- card: 外観 / 言語 (appearance + language) ---
@@ -815,15 +817,20 @@ class HelpDialog(_TitlebarMixin, ctk.CTkToplevel):
         self._step(b, t("help3_s3"))
         self._note(b, t("help3_note"))
 
-        # ④ cookies.txt
-        b = self._section(wrap, t("help4_title"))
-        self._step(b, t("help4_s1"))
-        self._link(b, t("help4_l1"), AMAZON_NOTEBOOK_URL)
-        self._step(b, t("help4_s2"))
-        self._link(b, t("help4_l2"), COOKIES_EXT_SEARCH_URL)
-        self._step(b, t("help4_s3"))
-        self._step(b, t("help4_s4"))
-        self._note(b, t("help4_note"))
+        # ④ Sign in — WebView2 login on Windows, cookies.txt elsewhere (macOS).
+        if sys.platform.startswith("win"):
+            b = self._section(wrap, t("help4_login_title"))
+            self._step(b, t("help4_login_s1"))
+            self._note(b, t("help4_login_note"))
+        else:
+            b = self._section(wrap, t("help4_title"))
+            self._step(b, t("help4_s1"))
+            self._link(b, t("help4_l1"), AMAZON_NOTEBOOK_URL)
+            self._step(b, t("help4_s2"))
+            self._link(b, t("help4_l2"), COOKIES_EXT_SEARCH_URL)
+            self._step(b, t("help4_s3"))
+            self._step(b, t("help4_s4"))
+            self._note(b, t("help4_note"))
 
         br = ctk.CTkFrame(self, fg_color="transparent")
         br.pack(fill="x", padx=16, pady=(0, 14))

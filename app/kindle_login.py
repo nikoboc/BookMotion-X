@@ -20,29 +20,8 @@ import kindle_notion as core
 LOGIN_URL = "https://read.amazon.co.jp/notebook"
 # Amazon auth cookies — any one of these means the browser session is signed in.
 AUTH_COOKIES = ("at-main", "sess-at-main", "x-main", "session-token")
-POLL_SECONDS = 1.0
+POLL_SECONDS = 0.5
 TIMEOUT_SECONDS = 300
-
-# Stop Amazon from auto-launching a passkey / Windows Hello in the embedded
-# WebView2, where the passkey ceremony can't complete the login — leaving the
-# user stuck. The gentle, non-disruptive way: keep window.PublicKeyCredential
-# present (so feature detection doesn't break Amazon's page), but report that no
-# platform authenticator (Windows Hello) is available and that conditional
-# mediation is unavailable. A well-behaved site checks these before offering /
-# auto-triggering a platform passkey, so Amazon falls back to password + OTP.
-#
-# We deliberately do NOT hide PublicKeyCredential or override credentials.get():
-# an earlier version did, and rejecting the conditional-mediation get() Amazon
-# fires on the email page broke the email→password transition entirely. Only the
-# two capability probes are patched, on each page load. (Process-level WebView2
-# flags were tried first but don't disable WebAuthn in this runtime.)
-_DISABLE_WEBAUTHN_JS = (
-    "(function(){try{if(window.PublicKeyCredential){"
-    "window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable="
-    "function(){return Promise.resolve(false);};"
-    "window.PublicKeyCredential.isConditionalMediationAvailable="
-    "function(){return Promise.resolve(false);};}}catch(e){}})();"
-)
 
 
 def _epoch(expires):
@@ -88,45 +67,69 @@ def run() -> int:
 
     state = {"saved": 0}
 
-    def disable_webauthn(window):
-        """Report no platform passkey (see _DISABLE_WEBAUTHN_JS). Best-effort."""
-        try:
-            window.evaluate_js(_DISABLE_WEBAUTHN_JS)
-        except Exception:
-            pass
+    def try_harvest(window):
+        """Save the Kindle cookies if the browser session is now signed in.
 
-    def harvest(window):
-        disable_webauthn(window)  # cover the first page immediately
-        deadline = time.monotonic() + TIMEOUT_SECONDS
-        while time.monotonic() < deadline and not state["saved"]:
-            time.sleep(POLL_SECONDS)
+        Returns True once cookies are saved. Skips while still on the Amazon
+        sign-in flow (/ap/ or signin URLs). Any sign-in method — password, OTP or
+        passkey / Windows Hello — ends on the notebook page, where the auth
+        cookies become readable, so this works regardless of how the user logs in.
+        """
+        if state["saved"]:
+            return True
+        try:
+            url = window.get_current_url() or ""
+            if "/ap/" in url or "signin" in url:
+                return False  # still signing in — wait
+            cookies = _flatten(window.get_cookies())
+        except Exception:
+            return False
+        if any(c["name"] in AUTH_COOKIES for c in cookies):
             try:
-                url = window.get_current_url() or ""
-                if "/ap/" in url or "signin" in url:
-                    continue  # still on the sign-in flow — wait
-                cookies = _flatten(window.get_cookies())
+                state["saved"] = core.save_cookies(cookies)
             except Exception:
-                continue
-            if any(c["name"] in AUTH_COOKIES for c in cookies):
-                try:
-                    state["saved"] = core.save_cookies(cookies)
-                except Exception:
-                    state["saved"] = 0
-                break
+                state["saved"] = 0
+            return bool(state["saved"])
+        return False
+
+    def close(window):
         try:
             window.destroy()
         except Exception:
             pass
 
+    def harvest(window):
+        # Backstop poll. The loaded/closing events below catch the sign-in the
+        # instant it happens, so success no longer depends on the window staying
+        # open long enough for the next poll tick.
+        deadline = time.monotonic() + TIMEOUT_SECONDS
+        while time.monotonic() < deadline and not state["saved"]:
+            time.sleep(POLL_SECONDS)
+            if try_harvest(window):
+                break
+        close(window)
+
     try:
         window = webview.create_window(
             "Kindle — ログイン / Sign in", LOGIN_URL, width=520, height=760)
-        # Also inject the moment each page's DOM is ready, before the user can
-        # reach the password field and trigger a passkey.
+
+        def _on_loaded(*a):
+            # Grab the cookies as soon as a post-login page finishes loading and
+            # close the window immediately — covers password, OTP and passkey.
+            if try_harvest(window):
+                close(window)
+
+        def _on_closing(*a):
+            # If the window is closed right after a successful sign-in (e.g. the
+            # user closes it), make one last attempt to capture the session.
+            try_harvest(window)
+
         try:
-            window.events.loaded += lambda *a: disable_webauthn(window)
+            window.events.loaded += _on_loaded
+            window.events.closing += _on_closing
         except Exception:
             pass
+
         webview.start(harvest, window)
     except Exception:
         return 1

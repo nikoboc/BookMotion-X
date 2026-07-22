@@ -40,7 +40,7 @@ SUB_HOVER    = ("#C4CBD3", "#8F959C")  # hover / pressed secondary fill
 ACCENT_LINK  = ("#3A5F8A", "#8FB2D6")  # muted-blue link text over the window / card bg
 
 OK_COLOR  = ("#3F7D4F", "#7FB389")  # muted green — cookies still valid   (semantic)
-BAD_COLOR = ("#B0473C", "#D99A90")  # muted red   — expired / re-import    (semantic)
+BAD_COLOR = ("#B0473C", "#D99A90")  # muted red   — expired / re-login     (semantic)
 
 
 def _apply_palette():
@@ -227,8 +227,8 @@ _TR = {
     "log_error": ("エラー: {e}", "Error: {e}"),
     "summary_fmt": ("新規 {inserted} / 重複 {skipped} / 失敗 {failed}",
                     "New {inserted} / Dup {skipped} / Failed {failed}"),
-    "sync_err_cookies": ("cookies.txt が取り込まれていません。「取り込み…」から取り込んでください。",
-                         "cookies.txt hasn't been imported. Import it from “Import…”."),
+    "sync_err_cookies": ("Kindle にログインしていません。「Kindle にログイン」からサインインしてください。",
+                         "You're not signed in to Kindle. Click “Sign in to Kindle” to sign in."),
     "prog_done": ("完了", "Done"),
     "prog_error": ("エラー", "Error"),
     "notif_done_title": ("Booklight 同期完了", "Booklight — Sync complete"),

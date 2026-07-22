@@ -89,10 +89,12 @@ _TR = {
                            "Loaded {n} cookies from cookies.txt"),
     "err_not_logged_in": (
         "ログインしていません。Cookie の有効期限が切れた可能性があります。"
-        "ブラウザで read.amazon.co.jp にログインし直し、新しい cookies.txt を"
-        "書き出して「取り込み…」から入れ直してください。",
-        "Not logged in — your cookies may have expired. Log back in to "
-        "read.amazon.co.jp, export a fresh cookies.txt, and re-import it via “Import…”."),
+        "アプリでは「Kindle にログイン」から再度サインインしてください"
+        "（CLI 実行時は read.amazon.co.jp にログインし直し、新しい cookies.txt を"
+        "書き出して -c で渡してください）。",
+        "Not logged in — your cookies may have expired. In the app, click "
+        "“Sign in to Kindle” to sign in again (for the CLI, log back in to "
+        "read.amazon.co.jp, export a fresh cookies.txt, and pass it with -c)."),
     "err_fetch_books": ("本を取得できませんでした。ログイン状態を確認してください。",
                         "Couldn't fetch your books. Check that you're logged in."),
     "log_fetch_library": ("本一覧を取得中…", "Fetching your library…"),

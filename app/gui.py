@@ -499,6 +499,26 @@ class _TitlebarMixin:
         except Exception:
             pass
 
+    def _windows_set_titlebar_icon(self):
+        """Stamp our app icon on the title bar instead of CustomTkinter's logo.
+
+        CTk / CTkToplevel schedule this ~200 ms after creation to set their
+        bundled CustomTkinter_icon_Windows.ico; we override it so every window —
+        the main window and the child dialogs (settings / help) — carries
+        appicon.ico instead. Without this, dialogs (which never call iconbitmap
+        themselves) fall through CTk's `_iconbitmap_method_called` guard and get
+        the CustomTkinter logo. Off Windows CTk never calls this. Best-effort: a
+        silent no-op on failure leaves the OS default rather than the CTk logo.
+        """
+        if not sys.platform.startswith("win"):
+            return
+        try:
+            ico = _icons_dir() / "appicon.ico"
+            if ico.is_file():
+                self.iconbitmap(str(ico))
+        except Exception:
+            pass
+
 
 class _AppRoot(_TitlebarMixin, ctk.CTk):
     """Main window — a CTk root whose title bar tracks BASE."""

@@ -15,7 +15,7 @@ cd mac-app
 |---|---|
 | **Python 3** | ビルドに必要。`python3 --version` で確認。無ければ `xcode-select --install`（または `brew install python`） |
 | **Tk**（Homebrew の Python のみ） | GUI ビルドに必要なことがある: `brew install python-tk` |
-| **Kindle Cookie** | `read.amazon.co.jp` にログイン済みのブラウザから `cookies.txt` を書き出しておくこと（「Get cookies.txt LOCALLY」等の拡張機能） |
+| **Amazon アカウント** | GUI は起動後に「**Kindle にログイン**」ボタンからアプリ内ブラウザ（WKWebView）でサインインするだけ。事前の `cookies.txt` は不要（**下記デバッグ用の CLI を使うときだけ** `read.amazon.co.jp` の `cookies.txt` を「Get cookies.txt LOCALLY」等で書き出す） |
 | **Notion トークン** | [notion.so/my-integrations](https://www.notion.so/my-integrations) で内部インテグレーションを作成 → トークンをコピー |
 | **Notion 親ページ** | DB を置く親ページを開き「•••」→「連携」→ 作成したインテグレーションを追加（**忘れると 404**） |
 
@@ -35,11 +35,11 @@ Finder で **`build_mac.command` をダブルクリック**（または以下）
 ```
 
 - `requirements.txt` + `pyinstaller` を導入し、`gui.py` をバンドル（数分）
-- 成功すると **`dist/KindleNotion.app`** が生成される
+- 成功すると **`dist/Booklight.app`** が生成される
 
 ### 2. 起動
 
-`dist/KindleNotion.app` を **右クリック →「開く」**。
+`dist/Booklight.app` を **右クリック →「開く」**。
 
 > 未署名のため Gatekeeper が警告します。**初回だけ「右クリック→開く」** で許可すれば、以降は普通にダブルクリックで開けます。
 
@@ -49,10 +49,10 @@ Finder で **`build_mac.command` をダブルクリック**（または以下）
 
 1. **Notion トークン**
 2. **親ページ URL**
-3. **Cookie** … 「**取り込み…**」で `cookies.txt` を取り込む（取り込み後は元ファイル不要）
+3. **Kindle** … 「**Kindle にログイン**」を押すとアプリ内ブラウザ（WKWebView）が開くので、いつも通りサインイン（2FA も可）。Cookie は自動保存され、以後は自動更新される
 4. **「保存」** を押す（`DB ID` は空でOK。初回に自動作成して欄へ書き戻されます）
 
-> 設定は `~/Library/Application Support/KindleNotion/config.json` に自動保存され、次回起動時に復元されます。手でファイルを触る必要はありません。
+> 設定は `~/Library/Application Support/Booklight/config.json` に自動保存され、次回起動時に復元されます。手でファイルを触る必要はありません。（旧バージョンの `KindleNotion` フォルダにある設定は初回起動時に自動でコピー移行されます）
 
 ### 4. 実行
 
@@ -83,7 +83,7 @@ python3 -m venv .venv
 }
 ```
 
-探索順は `app/config.json` → 無ければ `~/.kindle-notion/config.json`。`.gitignore` 済み。
+探索順は `app/config.json` → 無ければ `~/.booklight/config.json`（旧 `~/.kindle-notion` も後方互換で読む）。`.gitignore` 済み。
 
 **実行**:
 
@@ -106,6 +106,6 @@ python3 -m venv .venv
 | `python3 が見つかりません` | `xcode-select --install` か `brew install python` |
 | ビルドで Tk エラー | `brew install python-tk` |
 | `.app` が開けない（Gatekeeper） | 右クリック →「開く」（初回のみ） |
-| 「ログインしていません」 | `cookies.txt` が古い可能性。`read.amazon.co.jp` にログインし直して書き出し、再度「取り込み…」 |
-| `cookies.txt` の書き出し方 | 「Get cookies.txt LOCALLY」等の拡張機能で `read.amazon.co.jp` の Cookie を書き出す |
+| 「ログインしていません」 | Cookie が古い可能性。**GUI は「Kindle にログイン」で再サインイン**。**CLI は** `cookies.txt` を書き出し直して `-c` で渡す |
+| CLI 用 `cookies.txt` の書き出し方 | 「Get cookies.txt LOCALLY」等の拡張機能で `read.amazon.co.jp` の Cookie を書き出す（GUI では不要） |
 | 本が少ない | ログインが切れている可能性。ログインし直して再実行 |

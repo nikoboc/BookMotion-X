@@ -8,7 +8,7 @@ Kindle のハイライト（`read.amazon.co.jp/notebook`）を取得し、**Noti
 | 実装 | 動作環境 | 使い方 | 特徴 |
 |---|---|---|---|
 | [`extension/`](extension/) | Chrome / Edge の拡張機能（MV3） | ブラウザのポップアップから操作 | ログイン中のブラウザセッションをそのまま利用。導入が手軽 |
-| [`app/`](app/) ＋ [`mac-app/`](mac-app/)・[`win-app/`](win-app/) | macOS / Windows の Python アプリ | クリック実行（GUI）または CLI | ブラウザ自動操作なしの単なるプロセス。別アプリに切り替えても止まらない。`.app` / `.exe` 化も可能 |
+| [`app/`](app/) ＋ [`mac-app/`](mac-app/)・[`win-app/`](win-app/) | macOS / Windows の Python アプリ | クリック実行（GUI）または CLI | GUI アプリ名は **Booklight**。同期はブラウザ自動操作なしの単なるプロセスで、別アプリに切り替えても止まらない。`.app` / `.exe` 化も可能 |
 
 どちらも登録先の Notion DB スキーマ（列構成・重複防止ロジック）は共通です。
 
@@ -34,19 +34,20 @@ Kindle のハイライト（`read.amazon.co.jp/notebook`）を取得し、**Noti
 ├── app/                   【実装B・共通コア】Mac/Win 同一の Python コード
 │   ├── README.md          セットアップと実行方法（GUI / CLI）
 │   ├── kindle_notion.py   コア。Kindle 取得＋整形＋Notion 登録（CLI エントリでもある）
-│   ├── gui.py             Tkinter GUI（.app / .exe のエントリポイント）
-│   ├── requirements.txt   依存（requests / beautifulsoup4 / customtkinter）
+│   ├── gui.py             Booklight GUI（.app / .exe のエントリポイント）
+│   ├── kindle_login.py    アプリ内ブラウザで Kindle にログインし Cookie を取得
+│   ├── requirements.txt   依存（requests / beautifulsoup4 / customtkinter / pywebview）
 │   └── config.example.json 設定ファイルの見本（実体 config.json は .gitignore 済み）
 │
 ├── mac-app/               【実装B・Mac 固有】起動とパッケージング（../app を参照）
 │   ├── BUILD_RUN_mac.md   macOS でのビルド→起動→設定→実行の詳細手順
 │   ├── run.command        ダブルクリック起動（初回に venv+依存を自動構築）
-│   └── build_mac.command  PyInstaller で KindleNotion.app をビルド（要 Mac）
+│   └── build_mac.command  PyInstaller で Booklight.app をビルド（要 Mac）
 │
 └── win-app/               【実装B・Windows 固有】起動とパッケージング（..\app を参照）
     ├── BUILD_RUN_win.md   Windows でのビルド→起動→設定→実行の詳細手順
     ├── run.bat            ダブルクリック起動（初回に venv+依存を自動構築）
-    └── build_win.bat      PyInstaller で KindleNotion.exe をビルド（要 Windows）
+    └── build_win.bat      PyInstaller で Booklight.exe をビルド（要 Windows）
 ```
 
 ## 仕組み（共通の流れ）
@@ -81,10 +82,13 @@ Kindle のハイライト（`read.amazon.co.jp/notebook`）を取得し、**Noti
 
 詳細は [extension/README.md](extension/README.md)。
 
-### 実装B：Python アプリ（Mac / Windows）
-1. `read.amazon.co.jp` にログイン済みのブラウザから `cookies.txt` を書き出しておく（「Get cookies.txt LOCALLY」等の拡張機能）。
-2. `mac-app/run.command`（Mac）/ `win-app/run.bat`（Windows）をダブルクリック、または `app/gui.py` を起動。
-3. トークン・親ページを入力し、`cookies.txt` を「取り込み」→「Notion へ同期」。
+### 実装B：Python アプリ（Booklight / Mac・Windows）
+1. ビルド済みの **Booklight.app（Mac）/ Booklight.exe（Win）** を起動、または `mac-app/run.command`・`win-app/run.bat` をダブルクリック、あるいは `app/gui.py` を起動。
+2. トークン・親ページを入力。
+3. **「Kindle にログイン」**を押すとアプリ内ブラウザ（Mac: WKWebView / Win: WebView2）が開くので、いつも通りサインイン（2FA も可）。Cookie は自動保存され、以後は必要に応じて自動更新される。
+4. **「Notion へ同期」**を押す。
+
+> CLI（ターミナル実行）だけは従来どおり書き出した `cookies.txt` を使います（下記の各 BUILD_RUN 参照）。
 
 詳細は [app/README.md](app/README.md)、ビルド手順は [mac-app/BUILD_RUN_mac.md](mac-app/BUILD_RUN_mac.md) / [win-app/BUILD_RUN_win.md](win-app/BUILD_RUN_win.md)。
 

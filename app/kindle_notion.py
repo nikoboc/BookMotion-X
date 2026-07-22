@@ -11,7 +11,7 @@ pushed into a Notion database.
 
 Being an ordinary process, it is not throttled when you switch to another app.
 
-Config lives in ~/.kindle-notion/config.json.
+Config lives in ~/.booklight/config.json (formerly ~/.kindle-notion).
 """
 from __future__ import annotations
 
@@ -129,29 +129,65 @@ _TR = {
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 LOCAL_CONFIG = SCRIPT_DIR / "config.json"
-HOME_CONFIG = Path.home() / ".kindle-notion" / "config.json"
+HOME_CONFIG = Path.home() / ".booklight" / "config.json"
+# Pre-rename data dir (the app was "KindleNotion"); still read for one-time
+# migration so upgraded installs keep their token and Kindle login.
+LEGACY_HOME_CONFIG = Path.home() / ".kindle-notion" / "config.json"
 _EMPTY = {"notion_token": "", "notion_parent_page_id": "", "notion_database_id": ""}
 
 
 # ---------------------------------------------------------------- config
+def _migrate_legacy_data(legacy: Path, base: Path) -> None:
+    """Copy config.json / cookies.txt from the pre-rename dir into ``base`` once.
+
+    Booklight was formerly "KindleNotion", so existing installs keep their data
+    in the old folder. Copy each file only if it isn't already in the new dir, so
+    an upgraded user keeps their token and Kindle login without re-entering them.
+    Non-destructive: the old folder is left in place as a backup.
+    """
+    if not legacy.exists() or legacy == base:
+        return
+    for name in ("config.json", "cookies.txt"):
+        src, dst = legacy / name, base / name
+        if src.exists() and not dst.exists():
+            try:
+                shutil.copyfile(src, dst)
+            except OSError:
+                pass
+
+
+def _packaged_data_dir() -> Path:
+    """Per-user data dir (config.json / cookies.txt) for the packaged app.
+
+    A packaged app runs read-only from inside the bundle, so its data lives here:
+    macOS uses Application Support, elsewhere a dotfolder in HOME. Old KindleNotion
+    data is migrated in on first run (see _migrate_legacy_data).
+    """
+    if sys.platform == "darwin":
+        support = Path.home() / "Library" / "Application Support"
+        base, legacy = support / "Booklight", support / "KindleNotion"
+    else:
+        base, legacy = Path.home() / ".booklight", Path.home() / ".kindle-notion"
+    base.mkdir(parents=True, exist_ok=True)
+    _migrate_legacy_data(legacy, base)
+    return base
+
+
 def get_config_path() -> Path:
     """Where config.json lives.
 
-    A packaged .app runs read-only from inside the bundle, so store config in
-    the user's Application Support instead. In dev, prefer a config.json next to
-    the script, then ~/.kindle-notion/config.json.
+    Packaged: the per-user data dir (see _packaged_data_dir). In dev: prefer a
+    config.json next to the script, then ~/.booklight/config.json, falling back
+    to the legacy ~/.kindle-notion/config.json if only that exists.
     """
     if getattr(sys, "frozen", False):  # packaged app
-        if sys.platform == "darwin":
-            base = Path.home() / "Library" / "Application Support" / "KindleNotion"
-        else:
-            base = Path.home() / ".kindle-notion"
-        base.mkdir(parents=True, exist_ok=True)
-        return base / "config.json"
+        return _packaged_data_dir() / "config.json"
     if LOCAL_CONFIG.exists():
         return LOCAL_CONFIG
     if HOME_CONFIG.exists():
         return HOME_CONFIG
+    if LEGACY_HOME_CONFIG.exists():
+        return LEGACY_HOME_CONFIG
     return LOCAL_CONFIG
 
 

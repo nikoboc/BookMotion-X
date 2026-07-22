@@ -1,6 +1,10 @@
 requests>=2.31
 beautifulsoup4>=4.12
 customtkinter>=5.2
+# CustomTkinter's CTkImage (used for the Kindle/Notion brand logos and the app
+# icon) needs Pillow, but some customtkinter releases don't declare it — pin it
+# explicitly so the build bundles it, otherwise the logos fall back to emoji.
+pillow>=10
 # Windows desktop notifications (macOS uses the built-in osascript, no dep).
 winotify>=1.1 ; sys_platform == "win32"
 # In-app Kindle sign-in via an embedded browser (WebView2 on Windows, WKWebView

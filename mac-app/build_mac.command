@@ -10,7 +10,9 @@ python3 -m venv .buildvenv || { echo "python3 が必要です (xcode-select --in
 ./.buildvenv/bin/pip install --quiet -r "$APP/requirements.txt" pyinstaller
 
 echo "== .appをビルド中 (数分かかります) =="
-./.buildvenv/bin/pyinstaller --noconfirm --windowed --name "Booklight" \
+# --clean wipes PyInstaller's cache first, so a dependency added to
+# requirements.txt (e.g. pillow) is always picked up on a rebuild.
+./.buildvenv/bin/pyinstaller --clean --noconfirm --windowed --name "Booklight" \
   --osx-bundle-identifier "com.local.booklight" \
   --icon "$APP/icons/appicon.icns" \
   --paths "$APP" \

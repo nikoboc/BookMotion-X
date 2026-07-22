@@ -13,7 +13,9 @@ py -3 -m venv .buildvenv || (echo Python 3 が見つかりません。python.org
 ".buildvenv\Scripts\python.exe" -m pip install --quiet -r "%APP%\requirements.txt" pyinstaller
 
 echo == exe をビルド中 (数分かかります) ==
-".buildvenv\Scripts\pyinstaller.exe" --noconfirm --windowed --onefile --name "Booklight" ^
+REM --clean wipes PyInstaller's cache first, so a dependency added to
+REM requirements.txt (e.g. pillow) is always picked up on a rebuild.
+".buildvenv\Scripts\pyinstaller.exe" --clean --noconfirm --windowed --onefile --name "Booklight" ^
   --icon "%APP%\icons\appicon.ico" ^
   --paths "%APP%" ^
   --add-data "%APP%\fonts;fonts" ^

@@ -1055,12 +1055,8 @@ class App:
         hdr.columnconfigure(0, weight=1)
         titles = ctk.CTkFrame(hdr, fg_color="transparent")
         titles.grid(row=0, column=0, sticky="w")
-        # App icon (left) + one-line description (right). The app name lives in
-        # the title bar now, so the header carries no title text — just the icon.
-        self._header_icon = self._app_icon(size=(40, 40))
-        if self._header_icon is not None:
-            ctk.CTkLabel(titles, text="", image=self._header_icon).pack(
-                side="left", padx=(0, 12))
+        # One-line description. The app name lives in the title bar now, so the
+        # header carries no title text — just the subtitle.
         ctk.CTkLabel(titles, text=t("app_subtitle"),
                      font=self.f_sub, text_color=MUTED, anchor="w").pack(side="left")
         # Right-aligned "last sync" summary (empty until the first sync).

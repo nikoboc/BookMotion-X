@@ -177,8 +177,8 @@ _TR = {
     "btn_close": ("閉じる", "Close"),
     # help dialog
     "help_title": ("取得方法 / ヘルプ", "Setup guide / Help"),
-    "help_intro": ("同期には ① Notion トークン ② 親ページ URL ③（任意）DB ID ④ Kindle へのサインイン が必要です。設定は「⚙ 設定」で行います。",
-                   "You need ① a Notion token, ② a parent page URL, ③ (optional) a DB ID, and ④ to sign in to Kindle. Set them up in “⚙ Settings”."),
+    "help_intro": ("同期には ① Notion トークン ② 親ページ URL ③（任意）DB ID が必要です。設定は「⚙ 設定」で行います。",
+                   "You need ① a Notion token, ② a parent page URL, and ③ (optional) a DB ID. Set them up in “⚙ Settings”."),
     "help1_title": ("① Notion トークンの取得", "① Get a Notion token"),
     "help1_s1": ("1. 下のリンクから「マイインテグレーション」を開きます。",
                  "1. Open “My integrations” from the link below."),
@@ -210,11 +210,6 @@ _TR = {
                  "In the URL “notion.so/…/xxxxxxxx?v=…”, the xxxxxxxx (32 hex chars) is the DB ID. Paste it into the “DB ID” field in “⚙ Settings”."),
     "help3_note": ("最後のスラッシュの後ろ・「?v=」より前が DB ID です（末尾のページ名部分は無視されます）。",
                    "The DB ID is the part after the last slash and before “?v=” (any trailing page-name part is ignored)."),
-    "help4_login_title": ("④ Kindle にサインイン", "④ Sign in to Kindle"),
-    "help4_login_s1": ("「⚙ 設定」の「Kindle にログイン」を押し、開いたウィンドウで Amazon にログインします（2要素認証もそのまま通ります）。",
-                       "In “⚙ Settings”, click “Sign in to Kindle” and log in to Amazon in the window that opens (2-factor auth works too)."),
-    "help4_login_note": ("ログインは自動で保存され、同期のたびに更新されます。cookies.txt は不要です。",
-                         "The sign-in is saved automatically and refreshed on every sync — no cookies.txt needed."),
     # dialogs / message boxes
     "mb_check_title": ("接続確認", "Test connection"),
     "mb_import_first": ("先に「Kindle にログイン」でサインインしてください。",
@@ -601,7 +596,12 @@ class SettingsDialog(_TitlebarMixin, ctk.CTkToplevel):
             card, font=app.f_small, text_color=MUTED, anchor="w", justify="left",
             wraplength=380,
             text=t("db_id_hint"),
-        ).grid(row=4, column=1, columnspan=2, sticky="w", padx=(0, 16), pady=(0, 16))
+        ).grid(row=4, column=1, columnspan=2, sticky="w", padx=(0, 16), pady=(0, 10))
+        # 取得方法 (setup guide) lives inside this card — it explains where the
+        # Notion token / parent URL / DB ID above come from.
+        help_btn = app._ghost(card, t("btn_help"), self._open_help)
+        help_btn.configure(height=34)
+        help_btn.grid(row=5, column=0, columnspan=3, sticky="w", padx=16, pady=(0, 14))
 
         # --- card: Kindle 接続情報 — sign in with the in-app browser (WebView2) ---
         c2 = ctk.CTkFrame(outer, corner_radius=12, border_width=1)
@@ -677,9 +677,6 @@ class SettingsDialog(_TitlebarMixin, ctk.CTkToplevel):
         br = ctk.CTkFrame(outer, fg_color="transparent")
         br.grid(row=4, column=0, sticky="ew", pady=(14, 0))
         br.columnconfigure(0, weight=1)
-        help_btn = app._ghost(br, t("btn_help"), self._open_help)
-        help_btn.configure(height=38)
-        help_btn.grid(row=0, column=0, sticky="w")
         save_btn = app._accent(br, t("btn_save_close"), self._save_close)
         save_btn.configure(height=38)
         save_btn.grid(row=0, column=1, sticky="e")
@@ -817,11 +814,6 @@ class HelpDialog(_TitlebarMixin, ctk.CTkToplevel):
         self._step(b, t("help3_s2"))
         self._step(b, t("help3_s3"))
         self._note(b, t("help3_note"))
-
-        # ④ Sign in to Kindle (in-app browser)
-        b = self._section(wrap, t("help4_login_title"))
-        self._step(b, t("help4_login_s1"))
-        self._note(b, t("help4_login_note"))
 
         br = ctk.CTkFrame(self, fg_color="transparent")
         br.pack(fill="x", padx=16, pady=(0, 14))

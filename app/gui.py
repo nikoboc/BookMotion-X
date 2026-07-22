@@ -508,6 +508,30 @@ def _style_titlebar(window, color_mode):
         pass
 
 
+def _center_window(win, w, h, parent=None):
+    """Place a CTk window (logical size w×h) centered on `parent`, or the screen.
+
+    CTk scales width/height by the window-scaling factor but passes the +x+y
+    offset through unscaled, while winfo_* reports physical pixels — so the
+    offset must be computed from the *physical* size to land centered on
+    high-DPI displays. `_apply_window_scaling` gives that physical size; if a
+    future CTk drops it we fall back to the logical size (correct at 100%).
+    """
+    try:
+        phys_w = win._apply_window_scaling(w)
+        phys_h = win._apply_window_scaling(h)
+    except Exception:
+        phys_w, phys_h = w, h
+    if parent is not None and parent.winfo_viewable():
+        parent.update_idletasks()  # ensure the parent's geometry is settled
+        x = parent.winfo_x() + (parent.winfo_width() - phys_w) // 2
+        y = parent.winfo_y() + (parent.winfo_height() - phys_h) // 2
+    else:
+        x = max(0, (win.winfo_screenwidth() - phys_w) // 2)
+        y = max(0, (win.winfo_screenheight() - phys_h) // 2)
+    win.geometry(f"{w}x{h}+{x}+{y}")
+
+
 class _TitlebarMixin:
     """Give a CTk / CTkToplevel a title bar painted to match BASE.
 
@@ -580,7 +604,7 @@ class SettingsDialog(_TitlebarMixin, ctk.CTkToplevel):
             "appearance": app.appearance_mode.get(),
         }
         self.title(t("settings_title"))
-        self.geometry("560x780")
+        _center_window(self, 560, 780, app.root)  # centered over the main window
         self.minsize(480, 660)
         self.transient(app.root)
         self.protocol("WM_DELETE_WINDOW", self._close)
@@ -776,7 +800,7 @@ class HelpDialog(_TitlebarMixin, ctk.CTkToplevel):
         super().__init__(parent or app.root)
         self.app = app
         self.title(t("help_title"))
-        self.geometry("620x720")
+        _center_window(self, 620, 720, parent or app.root)  # centered over its opener
         self.minsize(520, 480)
         self.transient(parent or app.root)
         self.protocol("WM_DELETE_WINDOW", self._close)
@@ -863,7 +887,7 @@ class App:
     def __init__(self, root: ctk.CTk):
         self.root = root
         root.title("Booklight")
-        root.geometry("720x820")
+        root.geometry("720x820")  # initial size; real centering happens post-map
         # Low min-height so the window can shrink to fit the collapsed log.
         root.minsize(640, 340)
         self._set_window_icon()
@@ -927,6 +951,14 @@ class App:
         self._build()
         # Guard against quitting mid-sync (accidental close).
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        # Center the window on screen. This can't be done reliably before the
+        # window maps: the final height isn't known until it fits to its
+        # collapsed content, and CTk's scaling re-application desyncs the
+        # position from the size when both are set pre-map. So hide the window
+        # and, on the first idle after it maps, place it centered at its real
+        # size (then reveal it — no flash at the wrong spot).
+        self.root.withdraw()
+        self.root.after(0, self._center_root)
 
     # -- fonts ---------------------------------------------------------------
     def _setup_fonts(self):
@@ -1491,6 +1523,30 @@ class App:
         if on:
             self.cookies_status.set(t("login_running"))
 
+    def _center_root(self):
+        """Reveal the main window centered on screen at its real (mapped) size.
+
+        Runs once, on the first idle after startup. deiconify() maps the window
+        so winfo_width/height report the actual physical size (screen coords are
+        physical too), then a position-only geometry recenters without touching
+        the fitted size. Doing this post-map sidesteps CTk's pre-map scaling
+        quirk that leaves the position stuck at the wrong offset.
+
+        The position is applied twice (with an idle pump between): on Windows the
+        first move right after mapping is overridden by the window manager's
+        default placement, and the second one — window now truly mapped — is what
+        sticks. Both run here before the frame is painted, so there's no visible
+        jump from the default corner to the center.
+        """
+        self.root.deiconify()
+        self.root.update_idletasks()
+        for _ in range(2):
+            w, h = self.root.winfo_width(), self.root.winfo_height()
+            x = max(0, (self.root.winfo_screenwidth() - w) // 2)
+            y = max(0, (self.root.winfo_screenheight() - h) // 2)
+            self.root.geometry(f"+{x}+{y}")
+            self.root.update_idletasks()
+
     def _logical_wh(self):
         """Current window (width, height) in logical px (geometry() is scaled back)."""
         w, h = self.root.geometry().split("+")[0].split("x")
@@ -1673,9 +1729,20 @@ def main():
 
         raise SystemExit(kindle_login.run())
     if sys.platform.startswith("win"):
-        try:  # own taskbar identity (+icon), not grouped under python.exe
-            import ctypes
+        import ctypes
 
+        # Make the process per-monitor DPI aware BEFORE Tk initializes. CTk sets
+        # this too, but only when the first CTk window is created — i.e. AFTER
+        # Tk's root exists, by which point Tk has already cached the scaled-down
+        # (logical) screen size. That stale winfo_screenwidth/height, mixed with
+        # the physical-pixel window size, makes the main window center against
+        # the wrong dimensions and land up-and-left of true center on high-DPI
+        # displays. Setting awareness first keeps every metric in physical px.
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
+        except Exception:
+            pass
+        try:  # own taskbar identity (+icon), not grouped under python.exe
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Booklight.App")
         except Exception:
             pass

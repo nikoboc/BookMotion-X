@@ -18,27 +18,28 @@ import customtkinter as ctk
 
 import kindle_notion as core
 
-# ---- Palette: cream base + gold accent, tuned to the app icon ----------------
-# Every value is a (light, dark) pair. Base/sub stay warm (cream / dark brown +
-# sage / amber); the accent is the icon's gold. On the gold ACCENT fills the
-# label is white in light mode and near-black in dark mode (per spec). SUB fills
-# are a mid-tone in both modes, so their label (ON_SUB) is dark in both. All
-# pairs were checked to clear WCAG AA on the surface they sit on.
-BASE   = ("#efe5cb", "#462e2e")  # window + card background   (ベース)
-SUB    = ("#bfc9bd", "#ad722f")  # secondary fills: card borders, 2nd-ary buttons, progress track (サブ)
-ACCENT = ("#9A6B00", "#F5B301")  # gold — primary actions, checkboxes, progress fill, selected (アクセント)
+# ---- Palette: soft, low-saturation cool neutrals + a muted blue accent -------
+# Every value is a (light, dark) pair. The base is nearly white in light mode and
+# nearly black in dark mode, with only a faint cool (blue-grey) tint; the accent
+# is a muted blue. On the ACCENT fills the label is white in light mode and a dark
+# navy in dark mode (the dark-mode accent is a soft light blue). SUB fills are a
+# mid-tone in both modes, so their label (ON_SUB) is dark in both. All pairs were
+# checked to clear WCAG AA on the surface they sit on.
+BASE   = ("#eef1f5", "#191b1f")  # window + card background — near white / near black (ベース)
+SUB    = ("#d4d9df", "#7f858c")  # secondary fills: card borders, 2nd-ary buttons, progress track (サブ)
+ACCENT = ("#3f6291", "#93b8db")  # muted blue — primary actions, checkboxes, progress, selected (アクセント)
 
-TEXT      = ("#3a2b23", "#efe5cb")  # primary text: dark brown on light / cream on dark
-MUTED     = ("#7c6a58", "#cbb48f")  # secondary / hint text
-ON_ACCENT = ("#FFFFFF", "#241C00")  # text + checkmark on a gold ACCENT fill (white / near-black)
-ON_SUB    = "#241C00"               # text on a SUB (sage/amber) fill — dark in both modes
+TEXT      = ("#2f333a", "#e5e8ec")  # primary text: cool charcoal on light / cool off-white on dark
+MUTED     = ("#6f757d", "#9aa0a8")  # secondary / hint text
+ON_ACCENT = ("#FFFFFF", "#15202B")  # text + checkmark on a blue ACCENT fill (white / dark navy)
+ON_SUB    = "#1E232A"               # text on a SUB fill — dark in both modes
 
-ACCENT_HOVER = ("#7E5700", "#E0A80D")  # hover / pressed accent fill
-SUB_HOVER    = ("#adb8ab", "#96631f")  # hover / pressed secondary fill
-ACCENT_LINK  = ("#8A6100", "#F5B301")  # gold link text over the window / card bg
+ACCENT_HOVER = ("#34527A", "#7FA8CE")  # hover / pressed accent fill
+SUB_HOVER    = ("#C4CBD3", "#8F959C")  # hover / pressed secondary fill
+ACCENT_LINK  = ("#3A5F8A", "#8FB2D6")  # muted-blue link text over the window / card bg
 
-OK_COLOR  = ("#15803D", "#22C55E")  # green — cookies still valid   (semantic, kept)
-BAD_COLOR = ("#DC2626", "#F87171")  # red   — expired / re-import    (semantic, kept)
+OK_COLOR  = ("#3F7D4F", "#7FB389")  # muted green — cookies still valid   (semantic)
+BAD_COLOR = ("#B0473C", "#D99A90")  # muted red   — expired / re-import    (semantic)
 
 
 def _apply_palette():

@@ -320,9 +320,16 @@ def _renew_saved_cookies(session) -> None:
     them in `session.cookies` in place. Persisting that set after a *successful*
     call lets the login self-renew like a browser, so it stays valid far longer.
     Best-effort: a save failure must never break the sync/check that just worked.
+
+    Renew only *refreshes* an existing store — it must never re-create one that
+    was deleted while the (30 s) probe was in flight. Without this guard, clearing
+    the sign-in during a background check would resurrect cookies.txt, leaving the
+    app "signed in" again until restart.
     """
     try:
         dst = get_cookies_path()
+        if not dst.exists():
+            return  # cleared mid-probe — don't resurrect the deleted store
         jar = MozillaCookieJar(str(dst))
         for c in session.cookies:  # requests' jar yields http.cookiejar.Cookie
             if "amazon" in (c.domain or ""):

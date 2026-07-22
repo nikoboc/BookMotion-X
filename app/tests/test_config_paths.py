@@ -136,3 +136,49 @@ def test_save_cookies_keeps_only_amazon_and_tolerates_bad_expiry(monkeypatch, tm
     jar = MozillaCookieJar(str(dst))
     jar.load(ignore_discard=True, ignore_expires=True)
     assert {c.name for c in jar} == {"at-main", "sess"}
+
+
+# ---- _renew_saved_cookies ---------------------------------------------------
+def _amazon_cookie(name="at-main", value="v1", domain=".amazon.co.jp"):
+    from http.cookiejar import Cookie
+
+    return Cookie(
+        version=0, name=name, value=value, port=None, port_specified=False,
+        domain=domain, domain_specified=True,
+        domain_initial_dot=domain.startswith("."),
+        path="/", path_specified=True, secure=False, expires=9999999999,
+        discard=False, comment=None, comment_url=None, rest={},
+    )
+
+
+class _FakeSession:
+    def __init__(self, cookies):
+        self.cookies = cookies
+
+
+def test_renew_does_not_resurrect_a_cleared_store(monkeypatch, tmp_path):
+    # Simulates the store being cleared while a probe was in flight: the file
+    # doesn't exist, so renew must be a no-op (not recreate it).
+    dst = tmp_path / "cookies.txt"
+    monkeypatch.setattr(k, "get_cookies_path", lambda: dst)
+
+    k._renew_saved_cookies(_FakeSession([_amazon_cookie()]))
+
+    assert not dst.exists()
+
+
+def test_renew_refreshes_an_existing_store(monkeypatch, tmp_path):
+    # When the store still exists, renew overwrites it with the session's
+    # (Amazon-refreshed) cookies as before.
+    dst = tmp_path / "cookies.txt"
+    dst.write_text("# existing store\n", encoding="utf-8")
+    monkeypatch.setattr(k, "get_cookies_path", lambda: dst)
+
+    k._renew_saved_cookies(_FakeSession([
+        _amazon_cookie(name="at-main"),
+        _amazon_cookie(name="tracker", domain=".doubleclick.net"),  # dropped
+    ]))
+
+    jar = MozillaCookieJar(str(dst))
+    jar.load(ignore_discard=True, ignore_expires=True)
+    assert {c.name for c in jar} == {"at-main"}

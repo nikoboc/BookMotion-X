@@ -857,6 +857,12 @@ class App:
         # that register later (e.g. the dialog's).
         self._validity_labels = []
         self._validity_color = MUTED
+        # Epoch for the async cookie-validity probe: bumped whenever the cookies
+        # change (cleared / re-signed-in) or a new probe starts, so a stale probe
+        # that finishes late can't overwrite the current status (e.g. re-showing
+        # "接続OK" after a Clear). _run_check captures it and only applies its
+        # result while it's still current.
+        self._check_epoch = 0
 
         # One-time migration: adopt a previously-referenced cookies.txt into the
         # app data dir so upgrading users keep working without re-importing.
@@ -1183,6 +1189,9 @@ class App:
             self.cookies_status.set(t("acct_set"))
         else:
             self.cookies_status.set(t("acct_unset"))
+            # Invalidate any in-flight probe so its late result can't re-show
+            # "接続OK" after the cookies were cleared.
+            self._check_epoch += 1
             self._set_validity("", MUTED)  # no cookies → nothing to validate
         win = self._settings_win
         if win is not None and win.winfo_exists():
@@ -1219,27 +1228,41 @@ class App:
             if not silent:
                 messagebox.showinfo(t("mb_check_title"), t("mb_import_first"))
             return
+        self._check_epoch += 1
+        epoch = self._check_epoch
         self._set_check_btn_state("disabled")
         self._set_validity(t("checking"), MUTED)
-        threading.Thread(target=self._run_check, daemon=True).start()
+        threading.Thread(target=self._run_check, args=(epoch,), daemon=True).start()
 
-    def _run_check(self):
-        """Worker: probe the saved cookies and update the validity label on the UI thread."""
+    def _run_check(self, epoch):
+        """Worker: probe the saved cookies and update the validity label on the UI thread.
+
+        Results are routed through _apply_check/_finish_check so a probe that
+        finishes after the cookies were cleared (or a newer probe started) is
+        discarded instead of overwriting the current status.
+        """
         try:
             ok = core.check_cookies(str(core.get_cookies_path()), log=lambda *_: None)
             if ok:
-                self.root.after(0, self._set_validity, t("conn_ok"), OK_COLOR)
+                self.root.after(0, self._apply_check, epoch, t("conn_ok"), OK_COLOR)
             else:
                 self.root.after(
-                    0, self._set_validity,
-                    t("cookies_expired"),
-                    BAD_COLOR)
+                    0, self._apply_check, epoch, t("cookies_expired"), BAD_COLOR)
         except Exception:
             self.root.after(
-                0, self._set_validity,
-                t("conn_failed"), MUTED)
+                0, self._apply_check, epoch, t("conn_failed"), MUTED)
         finally:
-            self.root.after(0, self._set_check_btn_state, "normal")
+            self.root.after(0, self._finish_check, epoch)
+
+    def _apply_check(self, epoch, text, color):
+        """Apply a probe result only if it's still the current one (UI thread)."""
+        if epoch == self._check_epoch:
+            self._set_validity(text, color)
+
+    def _finish_check(self, epoch):
+        """Re-enable the 接続確認 button after the current probe, if cookies remain."""
+        if epoch == self._check_epoch and core.has_saved_cookies():
+            self._set_check_btn_state("normal")
 
     # -- notion status / validity -------------------------------------------
     def _set_notion_validity(self, text, color):

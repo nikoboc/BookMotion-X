@@ -3,3 +3,6 @@ beautifulsoup4>=4.12
 customtkinter>=5.2
 # Windows desktop notifications (macOS uses the built-in osascript, no dep).
 winotify>=1.1 ; sys_platform == "win32"
+# In-app Kindle sign-in via an embedded browser (Windows / WebView2).
+pywebview>=5 ; sys_platform == "win32"
+pythonnet>=3 ; sys_platform == "win32"

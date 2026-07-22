@@ -22,6 +22,10 @@ echo == exe をビルド中 (数分かかります) ==
   --collect-all customtkinter ^
   --collect-all darkdetect ^
   --collect-all winotify ^
+  --collect-all webview ^
+  --collect-all clr_loader ^
+  --hidden-import clr ^
+  --hidden-import kindle_login ^
   "%APP%\gui.py"
 
 echo.

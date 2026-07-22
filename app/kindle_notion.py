@@ -226,6 +226,44 @@ def clear_saved_cookies() -> None:
         p.unlink()
 
 
+def save_cookies(cookies) -> int:
+    """Write harvested cookies to the app's store (Netscape cookies.txt format).
+
+    `cookies` is a list of dicts with at least name/value/domain and optional
+    path, expires (epoch seconds), secure. This is the in-app-login equivalent of
+    import_cookies_file: it lands cookies in the same place build_session reads,
+    so the rest of the pipeline is unchanged. Returns the number written. Only
+    read.amazon / .amazon cookies are kept (the auth session lives there).
+    """
+    from http.cookiejar import Cookie
+
+    dst = get_cookies_path()
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    jar = MozillaCookieJar(str(dst))
+    n = 0
+    for c in cookies:
+        name = (c.get("name") or "").strip()
+        domain = (c.get("domain") or "").strip()
+        if not name or "amazon" not in domain:
+            continue
+        try:
+            expires = int(c["expires"]) if c.get("expires") else None
+        except (TypeError, ValueError):
+            expires = None
+        jar.set_cookie(Cookie(
+            version=0, name=name, value=c.get("value", ""),
+            port=None, port_specified=False,
+            domain=domain, domain_specified=True,
+            domain_initial_dot=domain.startswith("."),
+            path=c.get("path") or "/", path_specified=True,
+            secure=bool(c.get("secure")), expires=expires,
+            discard=False, comment=None, comment_url=None, rest={},
+        ))
+        n += 1
+    jar.save(ignore_discard=True, ignore_expires=True)
+    return n
+
+
 # ---------------------------------------------------------------- session / cookies
 def load_cookies(cookies_file, log=print):
     if not cookies_file:
@@ -244,17 +282,42 @@ def build_session(cookies_file, log=print) -> requests.Session:
     return s
 
 
+def _renew_saved_cookies(session) -> None:
+    """Write the session's (possibly Amazon-refreshed) cookies back to the store.
+
+    Each request can rotate Amazon's tokens via Set-Cookie, and requests updates
+    them in `session.cookies` in place. Persisting that set after a *successful*
+    call lets the login self-renew like a browser, so it stays valid far longer.
+    Best-effort: a save failure must never break the sync/check that just worked.
+    """
+    try:
+        dst = get_cookies_path()
+        jar = MozillaCookieJar(str(dst))
+        for c in session.cookies:  # requests' jar yields http.cookiejar.Cookie
+            if "amazon" in (c.domain or ""):
+                jar.set_cookie(c)
+        if len(jar):
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            jar.save(ignore_discard=True, ignore_expires=True)
+    except Exception:
+        pass
+
+
 def check_cookies(cookies_file, log=print) -> bool:
     """Lightweight auth probe: True if the saved cookies still log us in.
 
     Fetches the notebook page and checks for a sign-in redirect — the same
     signal fetch_all_books uses. Returns False when the cookies have expired or
     been invalidated. Raises on network errors so callers can distinguish
-    "expired" (False) from "couldn't reach Amazon" (exception).
+    "expired" (False) from "couldn't reach Amazon" (exception). On success it
+    also renews the stored cookies (see _renew_saved_cookies).
     """
     session = build_session(cookies_file, log=log)
     r = session.get(NOTEBOOK, timeout=30)
-    return "signin" not in r.url and "/ap/" not in r.url
+    ok = "signin" not in r.url and "/ap/" not in r.url
+    if ok:
+        _renew_saved_cookies(session)
+    return ok
 
 
 # ---------------------------------------------------------------- parsing
@@ -662,6 +725,7 @@ def run_sync(cfg: dict, cookies_file=None, limit=None, log=print, progress=None)
     books = fetch_kindle(session, limit, log, progress)
     if not books:
         raise RuntimeError(t("err_zero_books"))
+    _renew_saved_cookies(session)  # keep the stored login fresh for next time
 
     had_db = bool((cfg.get("notion_database_id") or "").strip())
 

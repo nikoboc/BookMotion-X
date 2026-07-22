@@ -147,6 +147,15 @@ _TR = {
     "db_id_hint": ("空欄のまま同期すると、新しいデータベースを自動作成します。",
                    "Leave blank to auto-create a new database on sync."),
     "kindle_conn": ("Kindle 接続情報", "Kindle connection"),
+    "btn_kindle_login": ("Kindle にログイン", "Sign in to Kindle"),
+    "cookies_fallback": ("または cookies.txt を取り込む（上級者向け）",
+                         "…or import a cookies.txt (advanced)"),
+    "login_running": ("ログイン中…（開いたブラウザ窓で操作してください）",
+                      "Signing in… (use the browser window that opened)"),
+    "login_cancelled": ("ログインは完了しませんでした", "Sign-in didn't complete"),
+    "login_win_only": ("アプリ内ログインは現在 Windows のみ対応です。cookies.txt をご利用ください。",
+                       "In-app sign-in is currently Windows-only — please use cookies.txt."),
+    "login_title": ("Kindle ログイン", "Kindle sign-in"),
     "btn_check": ("接続確認", "Test"),
     "btn_import": ("取り込み…", "Import…"),
     "btn_clear": ("クリア", "Clear"),
@@ -583,29 +592,40 @@ class SettingsDialog(_TitlebarMixin, ctk.CTkToplevel):
             text=t("db_id_hint"),
         ).grid(row=4, column=1, columnspan=2, sticky="w", padx=(0, 16), pady=(0, 16))
 
-        # --- card: Kindle 接続情報 (cookie management) — top of the dialog ---
+        # --- card: Kindle 接続情報 — sign in (WebView2) or import a cookies.txt ---
         c2 = ctk.CTkFrame(outer, corner_radius=12, border_width=1)
         c2.grid(row=0, column=0, sticky="ew")
         c2.columnconfigure(0, weight=1)
         ctk.CTkLabel(c2, text=t("kindle_conn"), font=app.f_section, anchor="w").grid(
-            row=0, column=0, sticky="w", padx=16, pady=(14, 4))
-        ctk.CTkLabel(c2, text="cookies.txt", font=app.f_body, anchor="w").grid(
-            row=1, column=0, sticky="w", padx=16, pady=(0, 4))
-        ff = ctk.CTkFrame(c2, fg_color="transparent")
-        ff.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 14))
-        ff.columnconfigure(0, weight=1)
-        ctk.CTkLabel(ff, textvariable=app.cookies_status, font=app.f_small,
-                     text_color=MUTED, anchor="w").grid(row=0, column=0, sticky="w")
-        self.cookies_check_btn = app._ghost(ff, t("btn_check"), app._check_cookies, width=88)
-        self.cookies_check_btn.grid(row=0, column=1, padx=(8, 0))
-        app._ghost(ff, t("btn_import"), app._import_cookies, width=104).grid(
-            row=0, column=2, padx=(8, 0))
-        self.cookies_clear_btn = app._ghost(ff, t("btn_clear"), app._clear_cookies, width=72)
-        self.cookies_clear_btn.grid(row=0, column=3, padx=(8, 0))
-        self.valid_lbl = ctk.CTkLabel(ff, textvariable=app.cookies_valid,
+            row=0, column=0, sticky="w", padx=16, pady=(14, 6))
+
+        # Primary: sign in through an in-app browser (Windows) — no cookies.txt.
+        lr = ctk.CTkFrame(c2, fg_color="transparent")
+        lr.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 2))
+        lr.columnconfigure(1, weight=1)
+        self.login_btn = app._accent(lr, t("btn_kindle_login"), app._kindle_login)
+        self.login_btn.configure(height=36)
+        self.login_btn.grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(lr, textvariable=app.cookies_status, font=app.f_small,
+                     text_color=MUTED, anchor="w").grid(
+            row=0, column=1, sticky="w", padx=(10, 0))
+        self.valid_lbl = ctk.CTkLabel(c2, textvariable=app.cookies_valid,
                                       font=app.f_small, text_color=MUTED, anchor="w")
-        self.valid_lbl.grid(row=1, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        self.valid_lbl.grid(row=2, column=0, sticky="w", padx=16, pady=(2, 0))
         app._register_validity_label(self.valid_lbl)
+
+        # Fallback: import a cookies.txt manually (test / import / clear).
+        ctk.CTkLabel(c2, text=t("cookies_fallback"), font=app.f_small,
+                     text_color=MUTED, anchor="w").grid(
+            row=3, column=0, sticky="w", padx=16, pady=(10, 2))
+        ff = ctk.CTkFrame(c2, fg_color="transparent")
+        ff.grid(row=4, column=0, sticky="w", padx=16, pady=(0, 14))
+        self.cookies_check_btn = app._ghost(ff, t("btn_check"), app._check_cookies, width=88)
+        self.cookies_check_btn.grid(row=0, column=0, padx=(0, 8))
+        app._ghost(ff, t("btn_import"), app._import_cookies, width=104).grid(
+            row=0, column=1, padx=(0, 8))
+        self.cookies_clear_btn = app._ghost(ff, t("btn_clear"), app._clear_cookies, width=72)
+        self.cookies_clear_btn.grid(row=0, column=2)
         self.refresh_cookie_buttons(core.has_saved_cookies())
 
         # --- card: 外観 / 言語 (appearance + language) ---
@@ -1346,6 +1366,49 @@ class App:
         self._refresh_cookie_status()
         self.log(t("log_cookie_cleared"))
 
+    # -- in-app Kindle login (Windows / WebView2) ---------------------------
+    def _kindle_login(self):
+        """Open an in-app browser to sign in to Amazon and harvest the cookies."""
+        if not sys.platform.startswith("win"):
+            messagebox.showinfo(t("login_title"), t("login_win_only"))
+            return
+        self._set_login_running(True)
+        threading.Thread(target=self._run_kindle_login, daemon=True).start()
+
+    def _run_kindle_login(self):
+        """Worker thread: run the login subprocess (own process = own main thread
+        for pywebview) and wait for it, off the Tk event loop."""
+        ok = False
+        try:
+            if getattr(sys, "frozen", False):
+                cmd = [sys.executable, "--kindle-login"]
+            else:
+                cmd = [sys.executable, str(Path(sys.argv[0]).resolve()), "--kindle-login"]
+            flags = 0x08000000 if sys.platform.startswith("win") else 0  # CREATE_NO_WINDOW
+            ok = subprocess.run(cmd, creationflags=flags).returncode == 0
+        except Exception as e:
+            self.log(t("log_error").format(e=e))
+        self.root.after(0, self._after_kindle_login, ok)
+
+    def _after_kindle_login(self, ok):
+        self._set_login_running(False)
+        self._refresh_cookie_status()
+        if ok:
+            self._check_cookies(silent=True)  # validate the freshly saved cookies
+        else:
+            self._set_validity(t("login_cancelled"), MUTED)
+
+    def _set_login_running(self, on):
+        """Disable the login button + show a status while the browser window is open."""
+        win = self._settings_win
+        if win is not None and win.winfo_exists():
+            try:
+                win.login_btn.configure(state="disabled" if on else "normal")
+            except Exception:
+                pass
+        if on:
+            self.cookies_status.set(t("login_running"))
+
     def _logical_wh(self):
         """Current window (width, height) in logical px (geometry() is scaled back)."""
         w, h = self.root.geometry().split("+")[0].split("x")
@@ -1483,6 +1546,13 @@ class App:
 
 
 def main():
+    # Subprocess entry: open the in-app Kindle login (WebView2) and exit. This
+    # runs in its own process so pywebview can own the main thread (see App._run_
+    # kindle_login), leaving the Tk GUI's event loop untouched.
+    if "--kindle-login" in sys.argv:
+        import kindle_login
+
+        raise SystemExit(kindle_login.run())
     if sys.platform.startswith("win"):
         try:  # own taskbar identity (+icon), not grouped under python.exe
             import ctypes

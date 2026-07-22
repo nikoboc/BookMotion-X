@@ -12,7 +12,6 @@ Run as a short-lived subprocess: gui.py re-invokes the app with --kindle-login,
 so pywebview can own the process's main thread without fighting the Tk loop.
 Exit code 0 = cookies saved, non-zero = cancelled / unavailable / failed.
 """
-import sys
 import time
 from email.utils import parsedate_to_datetime
 

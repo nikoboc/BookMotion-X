@@ -211,16 +211,6 @@ def has_saved_cookies() -> bool:
     return get_cookies_path().exists()
 
 
-def saved_cookies_count() -> int:
-    p = get_cookies_path()
-    if not p.exists():
-        return 0
-    try:
-        return _count_cookies(p)
-    except Exception:
-        return 0
-
-
 def clear_saved_cookies() -> None:
     p = get_cookies_path()
     if p.exists():

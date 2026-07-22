@@ -19,6 +19,8 @@ echo "== .appをビルド中 (数分かかります) =="
   --collect-all certifi \
   --collect-all customtkinter \
   --collect-all darkdetect \
+  --collect-all webview \
+  --hidden-import kindle_login \
   "$APP/gui.py"
 
 echo ""

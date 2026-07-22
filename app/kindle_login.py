@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""In-app Kindle login (Windows / WebView2) — get cookies without cookies.txt.
+"""In-app Kindle login (Windows / macOS) — get cookies without cookies.txt.
 
-Opens a real browser window (WebView2 via pywebview) at the Amazon Kindle
-notebook page. The user signs in normally — 2FA / CAPTCHA included, since it is a
-real browser engine — and once the Amazon auth cookies appear we harvest them
+Opens a real browser window via pywebview (WebView2 on Windows, WKWebView on
+macOS) at the Amazon Kindle notebook page. The user signs in normally — 2FA /
+CAPTCHA included, since it is a real browser engine — and once the Amazon auth
+cookies appear we harvest them
 and save them to the app's cookie store, the same place a cookies.txt import
 writes. The rest of the sync pipeline (build_session → requests) is unchanged.
 
@@ -56,12 +57,10 @@ def _flatten(simple_cookies):
 def run() -> int:
     """Open the login window, harvest the Kindle cookies, and save them.
 
-    Returns 0 if cookies were saved, else non-zero: 2 = not Windows, 3 = no
-    pywebview available, 1 = the user cancelled or it timed out. See the module
-    docstring for the overall flow.
+    Works on Windows (WebView2) and macOS (WKWebView) via pywebview. Returns 0 if
+    cookies were saved, else non-zero: 3 = no pywebview backend available, 1 = the
+    user cancelled or it timed out. See the module docstring for the overall flow.
     """
-    if not sys.platform.startswith("win"):
-        return 2
     try:
         import webview
     except Exception:

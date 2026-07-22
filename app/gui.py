@@ -13,7 +13,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from datetime import datetime
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import messagebox
 
 import customtkinter as ctk
 
@@ -154,11 +154,7 @@ _TR = {
     "login_running": ("ログイン中…（開いたブラウザ窓で操作してください）",
                       "Signing in… (use the browser window that opened)"),
     "login_cancelled": ("ログインは完了しませんでした", "Sign-in didn't complete"),
-    "login_win_only": ("アプリ内ログインは現在 Windows のみ対応です。cookies.txt をご利用ください。",
-                       "In-app sign-in is currently Windows-only — please use cookies.txt."),
-    "login_title": ("Kindle ログイン", "Kindle sign-in"),
     "btn_check": ("接続確認", "Test"),
-    "btn_import": ("取り込み…", "Import…"),
     "btn_clear": ("クリア", "Clear"),
     "appearance": ("外観", "Appearance"),
     "theme": ("テーマ", "Theme"),
@@ -215,35 +211,16 @@ _TR = {
                        "In “⚙ Settings”, click “Sign in to Kindle” and log in to Amazon in the window that opens (2-factor auth works too)."),
     "help4_login_note": ("ログインは自動で保存され、同期のたびに更新されます。cookies.txt は不要です。",
                          "The sign-in is saved automatically and refreshed on every sync — no cookies.txt needed."),
-    "help4_title": ("④ cookies.txt の取得", "④ Get cookies.txt"),
-    "help4_s1": ("1. ブラウザで read.amazon.co.jp にログインしておきます。",
-                 "1. Log in to read.amazon.co.jp in your browser."),
-    "help4_l1": ("🔗 read.amazon.co.jp/notebook を開く", "🔗 Open read.amazon.co.jp/notebook"),
-    "help4_s2": ("2. Cookie 書き出し用の拡張機能を入れます（例:「Get cookies.txt LOCALLY」）。",
-                 "2. Install a cookie-export extension (e.g. “Get cookies.txt LOCALLY”)."),
-    "help4_l2": ("🔗 Chrome ウェブストアで「get cookies.txt」を検索",
-                 "🔗 Search the Chrome Web Store for “get cookies.txt”"),
-    "help4_s3": ("3. read.amazon.co.jp を開いた状態で拡張機能を起動し、cookies.txt をエクスポート（Export／Download）します。",
-                 "3. With read.amazon.co.jp open, run the extension and export/download cookies.txt."),
-    "help4_s4": ("4. 「⚙ 設定」の「Kindle 接続情報」→「取り込み…」から、その cookies.txt を選びます。",
-                 "4. In “⚙ Settings” → “Kindle connection” → “Import…”, pick that cookies.txt."),
-    "help4_note": ("取り込み後は元ファイル不要です。「✕ 期限切れ」と表示されたら、ログインし直して cookies.txt を取り直し、もう一度「取り込み…」してください。",
-                   "After importing, the original file isn't needed. If you see “✕ Expired”, log in again, re-export cookies.txt, and “Import…” once more."),
-    # dialogs / message boxes / file dialog
+    # dialogs / message boxes
     "mb_check_title": ("接続確認", "Test connection"),
-    "mb_import_first": ("先に cookies.txt を取り込んでください。", "Please import cookies.txt first."),
-    "filedlg_import_title": ("cookies.txt を取り込む", "Import cookies.txt"),
-    "filedlg_all": ("すべて", "All files"),
-    "mb_import_err_title": ("取り込みエラー", "Import error"),
-    "mb_import_err": ("cookies.txt を読み込めませんでした:\n{e}", "Couldn't read cookies.txt:\n{e}"),
+    "mb_import_first": ("先に「Kindle にログイン」でサインインしてください。",
+                        "Please sign in with “Sign in to Kindle” first."),
     "mb_confirm_title": ("確認", "Confirm"),
     "mb_clear_confirm": ("保存済みの Kindle 接続情報を削除しますか？", "Delete the saved Kindle connection info?"),
     "mb_syncing_title": ("同期中", "Sync in progress"),
     "mb_quit_confirm": ("同期を実行中です。中断して終了しますか？\n（登録済みの分は残り、次回の実行で続きから再開できます）",
                         "A sync is running. Stop it and quit?\n(Already-saved items remain; the next run resumes where it left off.)"),
     # log / progress / notifications
-    "log_cookie_imported": ("Cookie を取り込みました（{n} 件）。以後この元ファイルは不要です → {path}",
-                            "Imported cookies ({n} entries). You no longer need the original file → {path}"),
     "log_cookie_cleared": ("保存済みの Cookie を削除しました。", "Deleted the saved cookies."),
     "log_config_saved": ("設定を保存しました: {path}", "Settings saved: {path}"),
     "log_done": ("完了: 対象 {total} / {summary}", "Done: {total} items / {summary}"),
@@ -296,8 +273,6 @@ def langpref_value(label):
 
 # External help links opened from the help window (取得方法).
 NOTION_INTEGRATIONS_URL = "https://www.notion.so/my-integrations"
-AMAZON_NOTEBOOK_URL = "https://read.amazon.co.jp/notebook"
-COOKIES_EXT_SEARCH_URL = "https://chromewebstore.google.com/search/get%20cookies.txt"
 
 
 def _fonts_dir() -> Path:
@@ -607,15 +582,12 @@ class SettingsDialog(_TitlebarMixin, ctk.CTkToplevel):
         ctk.CTkLabel(c2, text=t("kindle_conn"), font=app.f_section, anchor="w").grid(
             row=0, column=0, sticky="w", padx=16, pady=(14, 6))
 
-        # WebView2 sign-in is Windows-only; on other platforms (macOS) cookies.txt
-        # import remains the sign-in path since there is no in-app browser there.
-        win = sys.platform.startswith("win")
+        # Sign in with the in-app browser (WebView2 on Windows, WKWebView on macOS).
         top = ctk.CTkFrame(c2, fg_color="transparent")
         top.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 2))
-        if win:
-            self.login_btn = app._accent(top, t("btn_kindle_login"), app._kindle_login)
-            self.login_btn.configure(height=36)
-            self.login_btn.pack(side="left", padx=(0, 10))
+        self.login_btn = app._accent(top, t("btn_kindle_login"), app._kindle_login)
+        self.login_btn.configure(height=36)
+        self.login_btn.pack(side="left", padx=(0, 10))
         ctk.CTkLabel(top, textvariable=app.cookies_status, font=app.f_small,
                      text_color=MUTED, anchor="w").pack(side="left")
         self.valid_lbl = ctk.CTkLabel(c2, textvariable=app.cookies_valid,
@@ -628,9 +600,6 @@ class SettingsDialog(_TitlebarMixin, ctk.CTkToplevel):
         ff.grid(row=3, column=0, sticky="w", padx=16, pady=(8, 14))
         self.cookies_check_btn = app._ghost(ff, t("btn_check"), app._check_cookies, width=88)
         self.cookies_check_btn.pack(side="left", padx=(0, 8))
-        if not win:  # cookies.txt import is the sign-in path where WebView2 isn't available
-            app._ghost(ff, t("btn_import"), app._import_cookies, width=104).pack(
-                side="left", padx=(0, 8))
         self.cookies_clear_btn = app._ghost(ff, t("btn_clear"), app._clear_cookies, width=72)
         self.cookies_clear_btn.pack(side="left")
         self.refresh_cookie_buttons(core.has_saved_cookies())
@@ -817,20 +786,10 @@ class HelpDialog(_TitlebarMixin, ctk.CTkToplevel):
         self._step(b, t("help3_s3"))
         self._note(b, t("help3_note"))
 
-        # ④ Sign in — WebView2 login on Windows, cookies.txt elsewhere (macOS).
-        if sys.platform.startswith("win"):
-            b = self._section(wrap, t("help4_login_title"))
-            self._step(b, t("help4_login_s1"))
-            self._note(b, t("help4_login_note"))
-        else:
-            b = self._section(wrap, t("help4_title"))
-            self._step(b, t("help4_s1"))
-            self._link(b, t("help4_l1"), AMAZON_NOTEBOOK_URL)
-            self._step(b, t("help4_s2"))
-            self._link(b, t("help4_l2"), COOKIES_EXT_SEARCH_URL)
-            self._step(b, t("help4_s3"))
-            self._step(b, t("help4_s4"))
-            self._note(b, t("help4_note"))
+        # ④ Sign in to Kindle (in-app browser)
+        b = self._section(wrap, t("help4_login_title"))
+        self._step(b, t("help4_login_s1"))
+        self._note(b, t("help4_login_note"))
 
         br = ctk.CTkFrame(self, fg_color="transparent")
         br.pack(fill="x", padx=16, pady=(0, 14))
@@ -1384,24 +1343,6 @@ class App:
                 self._help_win = None
         self._help_win = HelpDialog(self, parent)
 
-    def _import_cookies(self):
-        """Read a cookies.txt and store it as app data; the original is then unneeded."""
-        p = filedialog.askopenfilename(
-            title=t("filedlg_import_title"),
-            filetypes=[("cookies.txt", "*.txt"), (t("filedlg_all"), "*.*")],
-        )
-        if not p:
-            return
-        try:
-            n = core.import_cookies_file(p)
-        except Exception as e:
-            messagebox.showerror(
-                t("mb_import_err_title"), t("mb_import_err").format(e=e))
-            return
-        self._refresh_cookie_status()
-        self.log(t("log_cookie_imported").format(n=n, path=core.get_cookies_path()))
-        self._check_cookies(silent=True)  # confirm the fresh cookies actually work
-
     def _clear_cookies(self):
         """Delete the app's saved cookies."""
         if not core.has_saved_cookies():
@@ -1415,9 +1356,6 @@ class App:
     # -- in-app Kindle login (Windows / WebView2) ---------------------------
     def _kindle_login(self):
         """Open an in-app browser to sign in to Amazon and harvest the cookies."""
-        if not sys.platform.startswith("win"):
-            messagebox.showinfo(t("login_title"), t("login_win_only"))
-            return
         self._set_login_running(True)
         threading.Thread(target=self._run_kindle_login, daemon=True).start()
 

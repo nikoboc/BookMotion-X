@@ -507,19 +507,23 @@ class _AppRoot(_TitlebarMixin, ctk.CTk):
 class SettingsDialog(_TitlebarMixin, ctk.CTkToplevel):
     """Modal dialog for the rarely-changed Notion settings (token / URL / DB ID).
 
-    Edits the App's shared StringVars directly; "保存して閉じる" persists via
-    App.save() and re-evaluates the main window's ready state.
+    The Notion fields (token / parent URL / DB ID) are edited in the dialog's
+    OWN StringVars, so typing here never touches the main window; they're copied
+    into the App and persisted only on "保存して閉じる", which then refreshes the
+    main window's status / banner / sync button.
     """
 
     def __init__(self, app):
         super().__init__(app.root)
         self.app = app
-        # Snapshot the current (saved) values so cancel can discard edits and
-        # nothing persists until "保存して閉じる".
+        # Notion fields edit local copies so the main window doesn't react while
+        # you type (no live error banner); they're applied on Save & close.
+        self.token_var = tk.StringVar(value=app.token.get())
+        self.parent_var = tk.StringVar(value=app.parent.get())
+        self.dbid_var = tk.StringVar(value=app.dbid.get())
+        # These two ARE bound live (theme previews, notify toggles in place), so
+        # snapshot them for cancel. Nothing else persists until "保存して閉じる".
         self._orig = {
-            "token": app.token.get(),
-            "parent": app.parent.get(),
-            "dbid": app.dbid.get(),
             "notify": app.notify_on_complete.get(),
             "appearance": app.appearance_mode.get(),
         }
@@ -555,7 +559,7 @@ class SettingsDialog(_TitlebarMixin, ctk.CTkToplevel):
         ctk.CTkLabel(card, text=t("notion_token"), font=app.f_body, anchor="w").grid(
             row=1, column=0, sticky="w", padx=(16, 8), pady=6)
         self.token_entry = ctk.CTkEntry(
-            card, textvariable=app.token, font=app.f_mono,
+            card, textvariable=self.token_var, font=app.f_mono,
             show="" if app.show_token.get() else "•")
         self.token_entry.grid(row=1, column=1, sticky="ew", padx=(0, 8), pady=6)
         ctk.CTkCheckBox(card, text=t("show"), variable=app.show_token, width=52,
@@ -566,12 +570,12 @@ class SettingsDialog(_TitlebarMixin, ctk.CTkToplevel):
 
         ctk.CTkLabel(card, text=t("parent_url"), font=app.f_body, anchor="w").grid(
             row=2, column=0, sticky="w", padx=(16, 8), pady=6)
-        ctk.CTkEntry(card, textvariable=app.parent, font=app.f_mono).grid(
+        ctk.CTkEntry(card, textvariable=self.parent_var, font=app.f_mono).grid(
             row=2, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=6)
 
         ctk.CTkLabel(card, text=t("db_id_optional"), font=app.f_body, anchor="w").grid(
             row=3, column=0, sticky="w", padx=(16, 8), pady=6)
-        ctk.CTkEntry(card, textvariable=app.dbid, font=app.f_mono).grid(
+        ctk.CTkEntry(card, textvariable=self.dbid_var, font=app.f_mono).grid(
             row=3, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=(6, 2))
         ctk.CTkLabel(
             card, font=app.f_small, text_color=MUTED, anchor="w", justify="left",
@@ -673,19 +677,23 @@ class SettingsDialog(_TitlebarMixin, ctk.CTkToplevel):
         self.token_entry.configure(show="" if self.app.show_token.get() else "•")
 
     def _save_close(self):
-        # The only place settings are persisted.
-        self.app.save()
-        self.app._update_ready_state()
-        self.app._check_notion()  # refresh the main-window Notion status
+        # The only place settings are persisted — and the only place the staged
+        # Notion edits reach the main window. Push the dialog's own vars into the
+        # app first, then save and refresh the main-window status/banner/button.
+        a = self.app
+        a.token.set(self.token_var.get())
+        a.parent.set(self.parent_var.get())
+        a.dbid.set(self.dbid_var.get())
+        a.save()
+        a._update_ready_state()
+        a._check_notion()  # refresh the main-window Notion status
         self._teardown()
 
     def _close(self):
-        # Cancel (X / window close): discard unsaved edits by restoring the
-        # values captured when the dialog opened, including the live theme.
+        # Cancel (X / window close): the Notion fields were edited in the dialog's
+        # own vars, so there's nothing to undo there. Only restore the live-bound
+        # values captured when the dialog opened (notify toggle, theme preview).
         a, o = self.app, self._orig
-        a.token.set(o["token"])
-        a.parent.set(o["parent"])
-        a.dbid.set(o["dbid"])
         a.notify_on_complete.set(o["notify"])
         revert_theme = a.appearance_mode.get() != o["appearance"]
         self._teardown()

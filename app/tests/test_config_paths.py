@@ -117,6 +117,40 @@ def test_packaged_data_dir_macos_location(monkeypatch, tmp_path):
     assert base.is_dir()
 
 
+def test_packaged_migration_does_not_resurrect_after_config_exists(monkeypatch, tmp_path):
+    # Regression: with a leftover legacy cookies.txt, migration ran on every
+    # get_cookies_path() call and re-copied it right after a Clear, so the app
+    # stayed "signed in" (接続OK) until restart. Once base has its own
+    # config.json (created at startup), migration must never resurrect it.
+    monkeypatch.setattr(k.sys, "platform", "win32")
+    monkeypatch.setattr(k.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(k.Path, "home", staticmethod(lambda: tmp_path))
+    legacy = tmp_path / ".kindle-notion"
+    legacy.mkdir()
+    (legacy / "cookies.txt").write_text("legacy-cookie", encoding="utf-8")
+
+    k.load_config()  # first run: creates ~/.booklight/config.json
+    (tmp_path / ".booklight" / "cookies.txt").write_text("signed-in", encoding="utf-8")
+    assert k.has_saved_cookies()
+
+    k.clear_saved_cookies()
+
+    assert not k.has_saved_cookies()  # stays cleared; not re-copied from legacy
+
+
+def test_packaged_first_run_still_adopts_legacy_cookies(monkeypatch, tmp_path):
+    # The first-run adoption itself must still work: with no base config yet,
+    # a legacy cookies.txt is copied in.
+    monkeypatch.setattr(k.sys, "platform", "win32")
+    monkeypatch.setattr(k.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(k.Path, "home", staticmethod(lambda: tmp_path))
+    legacy = tmp_path / ".kindle-notion"
+    legacy.mkdir()
+    (legacy / "cookies.txt").write_text("legacy-cookie", encoding="utf-8")
+
+    assert k.has_saved_cookies()  # adopted on first access (no base config yet)
+
+
 # ---- save_cookies -----------------------------------------------------------
 def test_save_cookies_keeps_only_amazon_and_tolerates_bad_expiry(monkeypatch, tmp_path):
     dst = tmp_path / "cookies.txt"

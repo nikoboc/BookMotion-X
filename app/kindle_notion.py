@@ -171,7 +171,13 @@ def _packaged_data_dir() -> Path:
     else:
         base, legacy = Path.home() / ".booklight", Path.home() / ".kindle-notion"
     base.mkdir(parents=True, exist_ok=True)
-    _migrate_legacy_data(legacy, base)
+    # Adopt old KindleNotion data only on a genuine first run — before this app
+    # has written its own config.json. This runs on EVERY get_config_path/
+    # get_cookies_path call, so migrating unconditionally would re-copy a legacy
+    # cookies.txt right back after the user clears the sign-in (has_saved_cookies
+    # goes through here), leaving them "signed in" until the legacy file is gone.
+    if not (base / "config.json").exists():
+        _migrate_legacy_data(legacy, base)
     return base
 
 

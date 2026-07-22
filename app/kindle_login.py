@@ -18,8 +18,12 @@ from email.utils import parsedate_to_datetime
 import kindle_notion as core
 
 LOGIN_URL = "https://read.amazon.co.jp/notebook"
-# Amazon auth cookies — any one of these means the browser session is signed in.
-AUTH_COOKIES = ("at-main", "sess-at-main", "x-main", "session-token")
+# Amazon sets an access-token cookie — "at-main" on .com, "at-acbjp" on .co.jp,
+# and the like — only after a successful sign-in (password, OTP, or passkey). Its
+# presence is the reliable "signed in" signal. NOTE: session-token / x-main are
+# set earlier in the flow, so treating them as success closed the login window
+# before the user had finished signing in — only the at-* access token counts.
+AUTH_COOKIE_PREFIX = "at-"
 POLL_SECONDS = 0.5
 TIMEOUT_SECONDS = 300
 
@@ -84,7 +88,7 @@ def run() -> int:
             cookies = _flatten(window.get_cookies())
         except Exception:
             return False
-        if any(c["name"] in AUTH_COOKIES for c in cookies):
+        if any((c.get("name") or "").startswith(AUTH_COOKIE_PREFIX) for c in cookies):
             try:
                 state["saved"] = core.save_cookies(cookies)
             except Exception:

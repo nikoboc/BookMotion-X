@@ -11,6 +11,7 @@ import threading
 import webbrowser
 import tkinter as tk
 import tkinter.font as tkfont
+from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
@@ -121,6 +122,7 @@ _TR = {
     # main window
     "app_subtitle": ("Kindle のハイライトを Notion に同期します",
                      "Sync your Kindle highlights to Notion"),
+    "last_sync_label": ("最終同期", "Last sync"),
     "warn_incomplete": ("⚠ トークンと親ページ URL が未設定です。「⚙ 設定」から入力してください。",
                         "⚠ Notion token and parent page URL aren't set. Enter them in “⚙ Settings”."),
     "btn_settings": ("⚙ 設定", "⚙ Settings"),
@@ -857,6 +859,8 @@ class App:
         ctk.set_appearance_mode(saved_theme)
         self.ui_language = tk.StringVar(
             value=langpref_label(cfg.get("ui_language", "auto")))
+        ls = cfg.get("last_sync")
+        self.last_sync = ls if isinstance(ls, dict) else None
         self.cookies_status = tk.StringVar(value="")
         self.cookies_valid = tk.StringVar(value="")
         # Notion connection status, shown on the right of the main window and
@@ -1058,6 +1062,11 @@ class App:
                 side="left", padx=(0, 12))
         ctk.CTkLabel(titles, text=t("app_subtitle"),
                      font=self.f_sub, text_color=MUTED, anchor="w").pack(side="left")
+        # Right-aligned "last sync" summary (empty until the first sync).
+        self.last_sync_lbl = ctk.CTkLabel(hdr, text="", font=self.f_small,
+                                          text_color=MUTED, anchor="e")
+        self.last_sync_lbl.grid(row=0, column=1, sticky="e")
+        self._update_last_sync_label()
 
         # --- settings-incomplete banner (row 1); hidden once token + URL are set ---
         self.warn = ctk.CTkLabel(
@@ -1509,7 +1518,7 @@ class App:
         self.status.configure(text=text)
 
     def _cfg_from_fields(self):
-        return {
+        cfg = {
             "notion_token": self.token.get().strip(),
             "notion_parent_page_id": self.parent.get().strip(),
             "notion_database_id": self.dbid.get().strip(),
@@ -1517,10 +1526,37 @@ class App:
             "appearance_mode": theme_value(self.appearance_mode.get()),
             "ui_language": langpref_value(self.ui_language.get()),
         }
+        if self.last_sync:
+            cfg["last_sync"] = self.last_sync
+        return cfg
 
     def save(self):
         core.save_config(self._cfg_from_fields())
         self.log(t("log_config_saved").format(path=core.get_config_path()))
+
+    def _update_last_sync_label(self):
+        """Show the header's 'last sync' summary from self.last_sync (or hide it)."""
+        ls = self.last_sync
+        if not ls:
+            self.last_sync_lbl.configure(text="")
+            return
+        try:
+            dt = datetime.fromtimestamp(int(ls.get("at", 0)))
+            when = f"{dt.month}/{dt.day} {dt.hour:02d}:{dt.minute:02d}"
+        except Exception:
+            when = "?"
+        summary = t("summary_fmt").format(
+            inserted=ls.get("inserted", 0), skipped=ls.get("skipped", 0),
+            failed=ls.get("failed", 0))
+        self.last_sync_lbl.configure(text=f"{t('last_sync_label')}: {when} · {summary}")
+
+    def _record_last_sync(self):
+        """Persist the last-sync record (quietly, no log) and refresh the header."""
+        try:
+            core.save_config(self._cfg_from_fields())
+        except Exception:
+            pass
+        self._update_last_sync_label()
 
     def sync(self):
         if not self._settings_ready():
@@ -1547,6 +1583,12 @@ class App:
             summary = t("summary_fmt").format(
                 inserted=res["inserted"], skipped=res["skipped"], failed=res["failed"])
             self.log(t("log_done").format(total=res["total"], summary=summary))
+            self.last_sync = {
+                "at": int(datetime.now().timestamp()),
+                "total": res["total"], "inserted": res["inserted"],
+                "skipped": res["skipped"], "failed": res["failed"],
+            }
+            self.root.after(0, self._record_last_sync)
             self.root.after(0, self._finish_progress, t("prog_done"))
             if self._notify_pref:
                 desktop_notify(t("notif_done_title"), summary)

@@ -125,6 +125,7 @@ _TR = {
                         "⚠ Notion token and parent page URL aren't set. Enter them in “⚙ Settings”."),
     "btn_settings": ("⚙ 設定", "⚙ Settings"),
     "btn_sync": ("Notion へ同期", "Sync to Notion"),
+    "btn_open_notion": ("Notion で開く", "Open in Notion"),
     "log_label": ("ログ", "Log"),
     # connection status
     "acct_set": ("アカウント情報設定済み", "Account configured"),
@@ -1110,11 +1111,19 @@ class App:
         ar = ctk.CTkFrame(self.outer, fg_color="transparent")
         ar.grid(row=3, column=0, sticky="ew", pady=(0, 12))
         ar.columnconfigure(1, weight=1)
-        self._ghost(ar, t("btn_settings"), self.open_settings, width=120).grid(
-            row=0, column=0, sticky="w")
+        left = ctk.CTkFrame(ar, fg_color="transparent")
+        left.grid(row=0, column=0, sticky="w")
+        self._ghost(left, t("btn_settings"), self.open_settings, width=100).pack(side="left")
+        self.open_notion_btn = self._ghost(
+            left, t("btn_open_notion"), self.open_notion_db, width=132)
+        self.open_notion_btn.pack(side="left", padx=(8, 0))
         self.sync_btn = self._accent(ar, t("btn_sync"), self.sync)
         self.sync_btn.configure(width=168, height=40)
         self.sync_btn.grid(row=0, column=2, sticky="e")
+        # Enable "Open in Notion" only once a database id is known; keep it in
+        # sync as the id changes (e.g. after the first sync auto-creates a DB).
+        self._update_open_notion_state()
+        self.dbid.trace_add("write", self._update_open_notion_state)
 
         # --- progress ---
         pf = ctk.CTkFrame(self.outer, fg_color="transparent")
@@ -1295,6 +1304,20 @@ class App:
         else:
             self.warn.grid()
             self.sync_btn.configure(state="disabled")
+
+    def open_notion_db(self):
+        """Open the configured Notion database in the default browser."""
+        url = core.database_url(self.dbid.get())
+        if url:
+            webbrowser.open(url)
+
+    def _update_open_notion_state(self, *_):
+        """Enable the 'Open in Notion' button only when a database id is set."""
+        state = "normal" if core.database_url(self.dbid.get()) else "disabled"
+        try:
+            self.open_notion_btn.configure(state=state)
+        except Exception:
+            pass
 
     def open_settings(self):
         """Open, or re-show and focus, the settings dialog.

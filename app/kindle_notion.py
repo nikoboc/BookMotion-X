@@ -501,6 +501,12 @@ def normalize_id(s: str) -> str:
     return f"{h[0:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:]}"
 
 
+def database_url(db_id: str) -> str:
+    """Browser URL that opens (redirects to) a Notion database by its id."""
+    h = normalize_id(db_id or "").replace("-", "")
+    return ("https://www.notion.so/" + h) if len(h) == 32 else ""
+
+
 def notion_fetch(token: str, path: str, method: str, body=None):
     headers = {
         "Authorization": f"Bearer {token}",

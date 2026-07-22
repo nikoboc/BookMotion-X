@@ -506,6 +506,7 @@ class _TitlebarMixin:
     """
 
     def _windows_set_titlebar_color(self, color_mode):
+        """Repaint the title bar for the given appearance mode (no-op off Windows)."""
         if not sys.platform.startswith("win"):
             return
         self._tb_mode = color_mode
@@ -556,6 +557,7 @@ class SettingsDialog(_TitlebarMixin, ctk.CTkToplevel):
         self.focus_force()
 
     def _build(self):
+        """Build the settings dialog: Kindle sign-in, Notion fields, theme/language, notifications."""
         app = self.app
         outer = ctk.CTkFrame(self, fg_color="transparent")
         outer.pack(fill="both", expand=True, padx=20, pady=18)
@@ -780,6 +782,7 @@ class HelpDialog(_TitlebarMixin, ctk.CTkToplevel):
             command=lambda u=url: webbrowser.open(u)).pack(fill="x", pady=(4, 2))
 
     def _build(self):
+        """Build the scrollable "how to set up" guide (token / URL / DB ID / cookies)."""
         app = self.app
         wrap = ctk.CTkScrollableFrame(self, fg_color="transparent")
         wrap.pack(fill="both", expand=True, padx=16, pady=(16, 8))
@@ -894,6 +897,7 @@ class App:
 
     # -- fonts ---------------------------------------------------------------
     def _setup_fonts(self):
+        """Create the CTkFonts used across the UI, preferring the bundled Noto Sans JP."""
         reg, med = _resolve_fonts(self.root)
         self.f_title = ctk.CTkFont(family=reg, size=22, weight="bold")
         self.f_sub = ctk.CTkFont(family=reg, size=13)
@@ -1041,6 +1045,7 @@ class App:
         self.root.after(200, apply)
 
     def _build(self):
+        """Build the main window: header, connection status, actions, progress, and log."""
         self.outer = ctk.CTkFrame(self.root, fg_color="transparent")
         self.outer.pack(fill="both", expand=True, padx=20, pady=18)
         self.outer.columnconfigure(0, weight=1)
@@ -1239,6 +1244,7 @@ class App:
         threading.Thread(target=self._run_check, daemon=True).start()
 
     def _run_check(self):
+        """Worker: probe the saved cookies and update the validity label on the UI thread."""
         try:
             ok = core.check_cookies(str(core.get_cookies_path()), log=lambda *_: None)
             if ok:
@@ -1281,6 +1287,7 @@ class App:
             target=self._run_notion_check, args=(token,), daemon=True).start()
 
     def _run_notion_check(self, token):
+        """Worker: validate the Notion token and update the Notion status on the UI thread."""
         try:
             ok = core.check_notion(token)
             if ok:
@@ -1518,6 +1525,7 @@ class App:
         self.status.configure(text=text)
 
     def _cfg_from_fields(self):
+        """Snapshot the current settings (plus last_sync) into a config dict for saving."""
         cfg = {
             "notion_token": self.token.get().strip(),
             "notion_parent_page_id": self.parent.get().strip(),
@@ -1559,6 +1567,7 @@ class App:
         self._update_last_sync_label()
 
     def sync(self):
+        """Persist settings, then run the sync on a worker thread (needs token + parent URL)."""
         if not self._settings_ready():
             self._update_ready_state()  # re-assert the banner / disabled button
             return
@@ -1571,6 +1580,7 @@ class App:
         threading.Thread(target=self._run, daemon=True).start()
 
     def _run(self):
+        """Worker thread: run the end-to-end sync, then report result, progress, and last-sync."""
         try:
             cfg = self._cfg_from_fields()
             if not core.has_saved_cookies():
@@ -1611,6 +1621,7 @@ class App:
 
 
 def main():
+    """Application entry point (and the ``--kindle-login`` subprocess dispatcher)."""
     # Subprocess entry: open the in-app Kindle login (WebView2) and exit. This
     # runs in its own process so pywebview can own the main thread (see App._run_
     # kindle_login), leaving the Tk GUI's event loop untouched.

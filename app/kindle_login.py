@@ -25,6 +25,7 @@ TIMEOUT_SECONDS = 300
 
 
 def _epoch(expires):
+    """Parse a cookie ``expires`` (RFC-1123 string) to epoch seconds, or None."""
     if not expires:
         return None
     try:
@@ -53,6 +54,12 @@ def _flatten(simple_cookies):
 
 
 def run() -> int:
+    """Open the login window, harvest the Kindle cookies, and save them.
+
+    Returns 0 if cookies were saved, else non-zero: 2 = not Windows, 3 = no
+    pywebview available, 1 = the user cancelled or it timed out. See the module
+    docstring for the overall flow.
+    """
     if not sys.platform.startswith("win"):
         return 2
     try:

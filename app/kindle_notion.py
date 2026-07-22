@@ -156,6 +156,7 @@ def get_config_path() -> Path:
 
 
 def load_config() -> dict:
+    """Load config.json, creating it with empty defaults on first run."""
     p = get_config_path()
     if not p.exists():
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -266,6 +267,7 @@ def save_cookies(cookies) -> int:
 
 # ---------------------------------------------------------------- session / cookies
 def load_cookies(cookies_file, log=print):
+    """Load a cookies.txt (Netscape/Mozilla jar); raise if no file is given."""
     if not cookies_file:
         raise RuntimeError(t("err_no_cookies"))
     cj = MozillaCookieJar()
@@ -275,6 +277,7 @@ def load_cookies(cookies_file, log=print):
 
 
 def build_session(cookies_file, log=print) -> requests.Session:
+    """A requests session preloaded with the saved cookies and the desktop UA."""
     s = requests.Session()
     s.headers.update({"User-Agent": UA, "Accept-Language": "ja,en;q=0.9"})
     for c in load_cookies(cookies_file, log):
@@ -322,6 +325,11 @@ def check_cookies(cookies_file, log=print) -> bool:
 
 # ---------------------------------------------------------------- parsing
 def parse_books(html: str) -> list:
+    """Parse the notebook library sidebar into ``[{asin, title, author}, ...]``.
+
+    Each book is a ``.kp-notebook-library-each-book`` div keyed by its ASIN (the
+    div id); the Japanese "著者:" / "著者：" prefix is stripped from the author.
+    """
     soup = BeautifulSoup(html, "html.parser")
     out = []
     for div in soup.select(".kp-notebook-library-each-book"):
@@ -344,6 +352,11 @@ def parse_books(html: str) -> list:
 
 
 def extract_color(row, header_text):
+    """The marker colour as a Japanese label (黄色/青/ピンク/オレンジ), or None.
+
+    Prefers the ``kp-notebook-highlight-<color>`` class; falls back to the colour
+    named in the header text when the class is missing.
+    """
     colored = row.select_one('[class*="kp-notebook-highlight-"]')
     if colored:
         classes = " ".join(colored.get("class", []))
@@ -363,6 +376,12 @@ def extract_color(row, header_text):
 
 
 def parse_annotations(html: str) -> dict:
+    """Parse one annotations page into ``{annotations, next_token, content_limit_state}``.
+
+    Each annotation carries id/highlight/note/header/color/location. ``next_token``
+    drives the server-side pagination and ``content_limit_state`` is echoed back on
+    the next request. A fallback selector handles pages whose container id differs.
+    """
     soup = BeautifulSoup(html, "html.parser")
     container = soup.select_one("#kp-notebook-annotations")
     rows = []
@@ -415,6 +434,7 @@ def parse_annotations(html: str) -> dict:
 
 # ---------------------------------------------------------------- kindle fetch
 def _next_library_token(html: str) -> str:
+    """The pagination token for the next library page (empty when it's the last)."""
     nxt = BeautifulSoup(html, "html.parser").select_one(
         ".kp-notebook-library-next-page-start"
     )
@@ -457,6 +477,11 @@ def fetch_all_books(session: requests.Session) -> list:
 
 
 def fetch_book_annotations(session: requests.Session, asin: str) -> list:
+    """All annotations for one book, following Amazon's server-side pagination.
+
+    Loops ``/notebook?asin=...`` with the returned next_token / content-limit
+    state until there is no next page (capped at 100 pages as a safety bound).
+    """
     annotations, token, cls = [], "", ""
     for _ in range(100):
         params = {"asin": asin, "contentLimitState": cls}
@@ -473,6 +498,12 @@ def fetch_book_annotations(session: requests.Session, asin: str) -> list:
 
 
 def fetch_kindle(session: requests.Session, limit, log=print, progress=None) -> list:
+    """Fetch the whole library and each book's annotations.
+
+    Returns the books, each with an ``annotations`` list attached. ``limit`` (if
+    set) caps how many books are fetched — used by the test-sync. Reports work via
+    the optional ``log`` / ``progress`` callbacks.
+    """
     log(t("log_fetch_library"))
     if progress:
         progress(t("prog_fetch_library"), 0, 0)  # count unknown yet → indeterminate
@@ -492,6 +523,11 @@ def fetch_kindle(session: requests.Session, limit, log=print, progress=None) -> 
 
 # ---------------------------------------------------------------- notion
 def normalize_id(s: str) -> str:
+    """Normalise a Notion id or URL to a dashed 32-hex UUID (best-effort).
+
+    Extracts the first 32-hex run (ignoring dashes) and re-inserts the
+    8-4-4-4-12 dashes; returns the input stripped if no id is found.
+    """
     if not s:
         return ""
     m = re.search(r"[0-9a-fA-F]{32}", s.replace("-", ""))
@@ -508,6 +544,11 @@ def database_url(db_id: str) -> str:
 
 
 def notion_fetch(token: str, path: str, method: str, body=None):
+    """Call the Notion API, retrying on 429 (rate limit) up to 5 times.
+
+    Honours the ``Retry-After`` header on 429 and raises RuntimeError with the
+    status + message on any other non-2xx. Returns the decoded JSON body.
+    """
     headers = {
         "Authorization": f"Bearer {token}",
         "Notion-Version": NOTION_VERSION,
@@ -548,6 +589,11 @@ def check_notion(token: str) -> bool:
 
 
 def create_database(token: str, parent_page_id: str):
+    """Create the "Kindle Highlights" database under the given parent page.
+
+    Defines the fixed schema (highlight / title / author / location / colour /
+    date / annotation-id).
+    """
     # NOTE: Notion's API ignores property order on database creation — the UI
     # shows columns in an internal (arbitrary) order regardless of the order
     # below or of adding them one-by-one via PATCH. The public API has no way to
@@ -579,6 +625,10 @@ def create_database(token: str, parent_page_id: str):
 
 
 def ensure_schema(token: str, db_id: str) -> None:
+    """Make sure the dedup-key column (注釈ID) exists on an existing database.
+
+    Lets the app append to a user-supplied database that predates this column.
+    """
     db = notion_fetch(token, "/databases/" + db_id, "GET")
     if db.get("properties", {}).get("注釈ID"):
         return
@@ -588,6 +638,7 @@ def ensure_schema(token: str, db_id: str) -> None:
 
 
 def query_existing_keys(token: str, db_id: str) -> set:
+    """All 注釈ID values already in the database (paged), for dedup on insert."""
     existing, cursor = set(), None
     while True:
         body = {"page_size": 100}
@@ -608,6 +659,7 @@ def query_existing_keys(token: str, db_id: str) -> set:
 
 
 def rich_text(content: str):
+    # Notion caps one rich_text object at 2000 chars, so split long text into chunks.
     s = content or ""
     return [
         {"type": "text", "text": {"content": s[i : i + 2000]}}
@@ -616,6 +668,11 @@ def rich_text(content: str):
 
 
 def page_properties(r: dict):
+    """Notion page properties for one highlight row.
+
+    The (Japanese) property names are the database schema — see the note in
+    create_database — and must match what query_existing_keys reads back.
+    """
     props = {
         "ハイライト文": {"title": rich_text(r["quote"])},
         "書籍名": {"rich_text": rich_text(r["title"])},
@@ -631,6 +688,12 @@ def page_properties(r: dict):
 
 
 def build_rows(books: list, today: str) -> list:
+    """Flatten books → one row per highlight, each with a stable dedup ``key``.
+
+    The key is the annotation id when present, else a
+    ``title|location|quote-prefix`` composite so id-less highlights still dedup.
+    Rows are sorted by title then location.
+    """
     rows = []
     for b in books:
         for a in b.get("annotations", []):
@@ -757,6 +820,7 @@ def run_sync(cfg: dict, cookies_file=None, limit=None, log=print, progress=None)
 
 # ---------------------------------------------------------------- main (CLI)
 def main() -> int:
+    """CLI entry point: sync using -c cookies.txt and the config.json token."""
     cfg = load_config()
     set_language(cfg.get("ui_language", "auto"))  # follow the saved pref, else OS
     ap = argparse.ArgumentParser(description="Kindle highlights → Notion (browser-free)")

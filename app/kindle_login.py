@@ -23,21 +23,25 @@ AUTH_COOKIES = ("at-main", "sess-at-main", "x-main", "session-token")
 POLL_SECONDS = 1.0
 TIMEOUT_SECONDS = 300
 
-# Force password/OTP sign-in by neutralising WebAuthn in the embedded browser.
-# Amazon otherwise offers a passkey, and on Windows the WebView2 auto-launches
-# Windows Hello for it — but the passkey assertion never completes the login in
-# this harvesting window, leaving the user stuck at the password step. Hiding
-# window.PublicKeyCredential makes Amazon's "is a passkey available?" probe say
-# no, and rejecting navigator.credentials.get() stops any passkey ceremony from
-# starting, so Amazon falls back to password. (A process-level WebView2 flag was
-# tried first but doesn't disable WebAuthn in this runtime; only JS injection
-# does.) Re-applied on every page load and each poll to survive navigations.
+# Stop Amazon from auto-launching a passkey / Windows Hello in the embedded
+# WebView2, where the passkey ceremony can't complete the login — leaving the
+# user stuck. The gentle, non-disruptive way: keep window.PublicKeyCredential
+# present (so feature detection doesn't break Amazon's page), but report that no
+# platform authenticator (Windows Hello) is available and that conditional
+# mediation is unavailable. A well-behaved site checks these before offering /
+# auto-triggering a platform passkey, so Amazon falls back to password + OTP.
+#
+# We deliberately do NOT hide PublicKeyCredential or override credentials.get():
+# an earlier version did, and rejecting the conditional-mediation get() Amazon
+# fires on the email page broke the email→password transition entirely. Only the
+# two capability probes are patched, on each page load. (Process-level WebView2
+# flags were tried first but don't disable WebAuthn in this runtime.)
 _DISABLE_WEBAUTHN_JS = (
-    "(function(){try{Object.defineProperty(window,'PublicKeyCredential',"
-    "{value:undefined,configurable:true});}catch(e){try{window.PublicKeyCredential="
-    "undefined;}catch(_){}}try{if(navigator.credentials){navigator.credentials.get="
-    "function(){return Promise.reject(new DOMException('WebAuthn disabled in "
-    "embedded login','NotAllowedError'));};}}catch(e){}})();"
+    "(function(){try{if(window.PublicKeyCredential){"
+    "window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable="
+    "function(){return Promise.resolve(false);};"
+    "window.PublicKeyCredential.isConditionalMediationAvailable="
+    "function(){return Promise.resolve(false);};}}catch(e){}})();"
 )
 
 
@@ -85,7 +89,7 @@ def run() -> int:
     state = {"saved": 0}
 
     def disable_webauthn(window):
-        """Re-apply the passkey block (see _DISABLE_WEBAUTHN_JS). Best-effort."""
+        """Report no platform passkey (see _DISABLE_WEBAUTHN_JS). Best-effort."""
         try:
             window.evaluate_js(_DISABLE_WEBAUTHN_JS)
         except Exception:
@@ -96,7 +100,6 @@ def run() -> int:
         deadline = time.monotonic() + TIMEOUT_SECONDS
         while time.monotonic() < deadline and not state["saved"]:
             time.sleep(POLL_SECONDS)
-            disable_webauthn(window)  # keep it applied across each navigation
             try:
                 url = window.get_current_url() or ""
                 if "/ap/" in url or "signin" in url:

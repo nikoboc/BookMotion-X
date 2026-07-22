@@ -1,0 +1,7 @@
+# Dev / test dependencies for the app/ core.
+# The tests exercise only the browser-free core (kindle_notion.py), which imports
+# just requests + beautifulsoup4. The GUI-only deps (customtkinter / pywebview /
+# pythonnet / winotify) live in requirements.txt and are not needed to run tests.
+requests>=2.31
+beautifulsoup4>=4.12
+pytest>=8

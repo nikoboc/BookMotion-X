@@ -551,12 +551,15 @@ def fetch_kindle(session: requests.Session, limit, log=print, progress=None) -> 
 def normalize_id(s: str) -> str:
     """Normalise a Notion id or URL to a dashed 32-hex UUID (best-effort).
 
-    Extracts the first 32-hex run (ignoring dashes) and re-inserts the
-    8-4-4-4-12 dashes; returns the input stripped if no id is found.
+    Extracts the 32-hex id (ignoring dashes) and re-inserts the 8-4-4-4-12
+    dashes; returns the input stripped if no id is found. The run must end at a
+    non-hex boundary (``(?![0-9a-fA-F])``) so a page slug that ends in hex
+    letters — e.g. ``.../Reading-Archive-<id>`` (“Archive” ends in ‘e’) — can't
+    merge into the id and shift the captured 32 chars rightward.
     """
     if not s:
         return ""
-    m = re.search(r"[0-9a-fA-F]{32}", s.replace("-", ""))
+    m = re.search(r"[0-9a-fA-F]{32}(?![0-9a-fA-F])", s.replace("-", ""))
     if not m:
         return s.strip()
     h = m.group(0).lower()

@@ -123,8 +123,12 @@ _TR = {
     "app_subtitle": ("Kindle のハイライトを Notion に同期します",
                      "Sync your Kindle highlights to Notion"),
     "last_sync_label": ("最終同期", "Last sync"),
-    "warn_incomplete": ("⚠ トークンと親ページ URL が未設定です。「⚙ 設定」から入力してください。",
+    "warn_incomplete": ("⚠ Notion のトークンと親ページ URL が未設定です。「⚙ 設定」から入力してください。",
                         "⚠ Notion token and parent page URL aren't set. Enter them in “⚙ Settings”."),
+    "warn_need_kindle": ("⚠ Kindle にサインインしていません。「⚙ 設定」からサインインしてください。",
+                         "⚠ You're not signed in to Kindle. Sign in from “⚙ Settings”."),
+    "warn_need_both": ("⚠ Notion と Kindle の設定が未完了です。「⚙ 設定」から設定してください。",
+                       "⚠ Notion and Kindle setup isn't complete. Finish it in “⚙ Settings”."),
     "btn_settings": ("⚙ 設定", "⚙ Settings"),
     "btn_sync": ("Notion へ同期", "Sync to Notion"),
     "btn_open_notion": ("Notion で開く", "Open in Notion"),
@@ -1175,6 +1179,8 @@ class App:
         win = self._settings_win
         if win is not None and win.winfo_exists():
             win.refresh_cookie_buttons(saved)
+        # Kindle sign-in is half of the sync gate — re-evaluate the button/banner.
+        self._update_ready_state()
 
     def _set_validity(self, text, color):
         """Update the shared validity text and recolor every registered label."""
@@ -1274,16 +1280,32 @@ class App:
         # withdraws the open dialog. `choice` is a localized label; map it back.
         ctk.set_appearance_mode(theme_value(choice))
 
-    def _settings_ready(self) -> bool:
-        """Token and parent-page URL are the two required settings; DB ID is optional."""
+    def _notion_ready(self) -> bool:
+        """Notion is set up once the token and parent-page URL are present (DB ID is optional)."""
         return bool(self.token.get().strip()) and bool(self.parent.get().strip())
 
+    def _kindle_ready(self) -> bool:
+        """Kindle is set up once a sign-in (cookies) has been saved."""
+        return core.has_saved_cookies()
+
+    def _settings_ready(self) -> bool:
+        """Sync needs BOTH accounts configured: Notion (token + parent URL) and Kindle (signed in)."""
+        return self._notion_ready() and self._kindle_ready()
+
     def _update_ready_state(self, *_):
-        """Enable sync only when required settings are present; else show a banner."""
-        if self._settings_ready():
+        """Enable sync only when both accounts are configured; else show what's missing."""
+        notion_ok, kindle_ok = self._notion_ready(), self._kindle_ready()
+        if notion_ok and kindle_ok:
             self.warn.grid_remove()
             self.sync_btn.configure(state="normal")
         else:
+            if not notion_ok and not kindle_ok:
+                key = "warn_need_both"
+            elif not kindle_ok:
+                key = "warn_need_kindle"
+            else:
+                key = "warn_incomplete"
+            self.warn.configure(text=t(key))
             self.warn.grid()
             self.sync_btn.configure(state="disabled")
 

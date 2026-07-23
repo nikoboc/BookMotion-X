@@ -4,8 +4,16 @@
 cd "$(dirname "$0")" || exit 1
 APP="../app"   # shared code lives here; venv + dist stay in mac-app/
 
+# Pick a python3 whose tkinter has Tk >= 8.6 (Apple's built-in python3 links the
+# deprecated system Tk 8.5.9, which crashes the bundled app on launch). See
+# _pick_python.sh for the full explanation.
+source "./_pick_python.sh"
+
 echo "== ビルド環境を準備 =="
-python3 -m venv .buildvenv || { echo "python3 が必要です (xcode-select --install など)"; exit 1; }
+PYBIN="$(pick_python)" || exit 1
+echo "使用する Python: $PYBIN (Tk $("$PYBIN" -c 'import tkinter; print(tkinter.TkVersion)'))"
+
+"$PYBIN" -m venv .buildvenv || { echo "venv の作成に失敗しました"; exit 1; }
 ./.buildvenv/bin/pip install --quiet --upgrade pip
 ./.buildvenv/bin/pip install --quiet -r "$APP/requirements.txt" pyinstaller
 

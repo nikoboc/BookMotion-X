@@ -13,8 +13,7 @@ cd mac-app
 
 | 必要なもの | 確認・入手 |
 |---|---|
-| **Python 3** | ビルドに必要。`python3 --version` で確認。無ければ `xcode-select --install`（または `brew install python`） |
-| **Tk**（Homebrew の Python のみ） | GUI ビルドに必要なことがある: `brew install python-tk` |
+| **Python 3（Tk 8.6 以上）** | GUI ビルドに必要。**Apple 標準の `python3`（Command Line Tools）は廃止済みの Tk 8.5.9 を使うため、ビルドしたアプリが起動時にクラッシュします**（`brew install python-tk` を入れても Apple 版には効きません）。[python.org 版](https://www.python.org/downloads/macos/)（Tk 8.6 同梱・**推奨**）か Homebrew（`brew install python python-tk`）を入れてください。`build_mac.command` が Tk 8.6 以上の Python を自動選択し、無ければ案内を出します |
 | **Amazon アカウント** | GUI は起動後に「**Kindle にログイン**」ボタンからアプリ内ブラウザ（WKWebView）でサインインするだけ。事前の `cookies.txt` は不要（**下記デバッグ用の CLI を使うときだけ** `read.amazon.co.jp` の `cookies.txt` を「Get cookies.txt LOCALLY」等で書き出す） |
 | **Notion トークン** | [notion.so/my-integrations](https://www.notion.so/my-integrations) で内部インテグレーションを作成 → トークンをコピー |
 | **Notion 親ページ** | DB を置く親ページを開き「•••」→「連携」→ 作成したインテグレーションを追加（**忘れると 404**） |
@@ -36,6 +35,9 @@ Finder で **`build_mac.command` をダブルクリック**（または以下）
 
 - `requirements.txt` + `pyinstaller` を導入し、`gui.py` をバンドル（数分）
 - 成功すると **`dist/Booklight.app`** が生成される
+
+> **ビルドせず試すには** `run.command` をダブルクリック。ソースから GUI をそのまま起動します（初回に venv を用意）。`build_mac.command` と同じく Tk 8.6 以上の Python を自動選択します。<br>
+> （`run.command` は GUI 用です。ターミナルで動かすコア機能＝CLI は下記「デバッグ用」の `kindle_notion.py -c cookies.txt` を使ってください。）
 
 ### 2. 起動
 
@@ -103,8 +105,8 @@ python3 -m venv .venv
 
 | 症状 | 対処 |
 |---|---|
-| `python3 が見つかりません` | `xcode-select --install` か `brew install python` |
-| ビルドで Tk エラー | `brew install python-tk` |
+| `Tk 8.6 以上を持つ python3 が見つかりません` | [python.org 版 Python](https://www.python.org/downloads/macos/) か `brew install python python-tk` を入れて再ビルド |
+| **起動直後にクラッシュ**（`Abort trap: 6` / クラッシュログに `TkpInit` `Tcl_Panic`） | Apple 標準 python（Tk 8.5.9）でビルドされたのが原因。python.org 版 Python か Homebrew python を入れて**再ビルド**すれば直る |
 | `.app` が開けない（Gatekeeper） | 右クリック →「開く」（初回のみ） |
 | 「ログインしていません」 | Cookie が古い可能性。**GUI は「Kindle にログイン」で再サインイン**。**CLI は** `cookies.txt` を書き出し直して `-c` で渡す |
 | CLI 用 `cookies.txt` の書き出し方 | 「Get cookies.txt LOCALLY」等の拡張機能で `read.amazon.co.jp` の Cookie を書き出す（GUI では不要） |

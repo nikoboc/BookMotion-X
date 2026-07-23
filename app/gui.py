@@ -42,6 +42,12 @@ ACCENT_LINK  = ("#3A5F8A", "#8FB2D6")  # muted-blue link text over the window / 
 OK_COLOR  = ("#3F7D4F", "#7FB389")  # muted green — cookies still valid   (semantic)
 BAD_COLOR = ("#B0473C", "#D99A90")  # muted red   — expired / re-login     (semantic)
 
+# The 中断 (stop-sync) button: a muted red fill so it reads as an interrupting
+# action, distinct from the blue primary "同期". Same hue as BAD_COLOR; ON_ACCENT
+# (white / dark navy) keeps the label legible on both the light and dark fills.
+STOP_COLOR = ("#B0473C", "#D99A90")
+STOP_HOVER = ("#9A3E34", "#C98A80")
+
 
 def _apply_palette():
     """Push the palette above into CustomTkinter's global theme so every widget
@@ -131,6 +137,8 @@ _TR = {
                        "⚠ Notion and Kindle setup isn't complete. Finish it in “⚙ Settings”."),
     "btn_settings": ("⚙ 設定", "⚙ Settings"),
     "btn_sync": ("Notion へ同期", "Sync to Notion"),
+    "btn_cancel_sync": ("中断", "Stop"),
+    "btn_cancelling": ("中断しています…", "Stopping…"),
     "btn_open_notion": ("Notion で開く", "Open in Notion"),
     "log_label": ("ログ", "Log"),
     # connection status
@@ -219,6 +227,9 @@ _TR = {
     "mb_syncing_title": ("同期中", "Sync in progress"),
     "mb_quit_confirm": ("同期を実行中です。中断して終了しますか？\n（登録済みの分は残り、次回の実行で続きから再開できます）",
                         "A sync is running. Stop it and quit?\n(Already-saved items remain; the next run resumes where it left off.)"),
+    "mb_cancel_title": ("同期の中断", "Stop sync"),
+    "mb_cancel_confirm": ("同期を中断しますか？\n（登録済みの分は残り、次回の実行で続きから再開できます）",
+                          "Stop the sync?\n(Already-saved items remain; the next run resumes where it left off.)"),
     # log / progress / notifications
     "log_cookie_cleared": ("保存済みの Cookie を削除しました。", "Deleted the saved cookies."),
     "log_config_saved": ("設定を保存しました: {path}", "Settings saved: {path}"),
@@ -230,6 +241,12 @@ _TR = {
                          "You're not signed in to Kindle. Click “Sign in to Kindle” to sign in."),
     "prog_done": ("完了", "Done"),
     "prog_error": ("エラー", "Error"),
+    "prog_cancelling": ("中断しています…", "Stopping…"),
+    "prog_cancelled": ("中断しました", "Stopped"),
+    "log_cancel_requested": ("中断を要求しました。処理中の通信が終わり次第、停止します…",
+                             "Stop requested. Will halt as soon as the in-flight request finishes…"),
+    "log_cancelled": ("同期を中断しました（新規 {inserted} 件を登録済み）。登録済みの分は残ります。",
+                      "Sync stopped ({inserted} new items saved). Already-saved items remain."),
     "notif_done_title": ("Booklight 同期完了", "Booklight — Sync complete"),
     "notif_err_title": ("Booklight 同期エラー", "Booklight — Sync error"),
 }
@@ -896,6 +913,10 @@ class App:
         core.set_language(LANG)  # the engine's runtime messages follow the same language
         self._indeterminate = False
         self._syncing = False
+        # Set (from the main thread) when the user confirms 中断; the worker polls
+        # its .is_set at loop boundaries and unwinds the sync. Cleared at the
+        # start of every sync so a prior stop doesn't cancel the next run.
+        self._cancel_event = threading.Event()
         self._notify_pref = True  # snapshot taken on the main thread at sync start
         self._expanded_h = 820    # logical height to restore when the log expands
 
@@ -1195,6 +1216,15 @@ class App:
         self.sync_btn = self._accent(ar, t("btn_sync"), self.sync)
         self.sync_btn.configure(width=168, height=40)
         self.sync_btn.grid(row=0, column=2, sticky="e")
+        # Stop-sync button: shares the sync button's cell and is shown only while a
+        # sync runs (see _enter_sync_ui). Gridded once, then hidden — grid_remove()
+        # remembers its placement so a bare .grid() re-shows it in the same spot.
+        self.cancel_btn = ctk.CTkButton(
+            ar, text=t("btn_cancel_sync"), command=self._cancel_sync, font=self.f_btn,
+            fg_color=STOP_COLOR, hover_color=STOP_HOVER, text_color=ON_ACCENT,
+            border_width=1, border_color=STOP_HOVER, width=168, height=40)
+        self.cancel_btn.grid(row=0, column=2, sticky="e")
+        self.cancel_btn.grid_remove()
         # Enable "Open in Notion" only once a database id is known; keep it in
         # sync as the id changes (e.g. after the first sync auto-creates a DB).
         self._update_open_notion_state()
@@ -1665,6 +1695,35 @@ class App:
             pass
         self._update_last_sync_label()
 
+    def _enter_sync_ui(self):
+        """Swap the primary 同期 button for the 中断 (stop) button while syncing."""
+        self.sync_btn.grid_remove()
+        self.cancel_btn.configure(state="normal", text=t("btn_cancel_sync"))
+        self.cancel_btn.grid()
+
+    def _exit_sync_ui(self):
+        """Restore the 同期 button once the sync ends (done / error / stopped)."""
+        self.cancel_btn.grid_remove()
+        self.sync_btn.grid()
+        self._update_ready_state()  # re-gate the sync button on current settings
+
+    def _cancel_sync(self):
+        """Ask to confirm, then request a stop; the worker halts at its next checkpoint.
+
+        Cancellation is cooperative: an in-flight network request (up to a 30 s
+        timeout) finishes before the loop notices the flag, so we disable the
+        button and switch it to “中断しています…” to show the request registered.
+        """
+        if not self._syncing or self._cancel_event.is_set():
+            return
+        if not messagebox.askyesno(t("mb_cancel_title"), t("mb_cancel_confirm")):
+            return
+        if not self._syncing:  # the sync finished on its own while the dialog was open
+            return
+        self._cancel_event.set()
+        self.cancel_btn.configure(state="disabled", text=t("btn_cancelling"))
+        self.log(t("log_cancel_requested"))
+
     def sync(self):
         """Persist settings, then run the sync on a worker thread (needs token + parent URL)."""
         if not self._settings_ready():
@@ -1672,9 +1731,10 @@ class App:
             return
         self.save()
         self._syncing = True
+        self._cancel_event.clear()  # a prior stop must not cancel this run
         # Snapshot the preference on the main thread; the worker reads this bool.
         self._notify_pref = bool(self.notify_on_complete.get())
-        self.sync_btn.configure(state="disabled")
+        self._enter_sync_ui()
         self._reset_progress()
         threading.Thread(target=self._run, daemon=True).start()
 
@@ -1686,7 +1746,8 @@ class App:
                 raise RuntimeError(t("sync_err_cookies"))
             cookies_file = str(core.get_cookies_path())
             res = core.run_sync(
-                cfg, cookies_file, None, log=self.log, progress=self.on_progress
+                cfg, cookies_file, None, log=self.log, progress=self.on_progress,
+                should_cancel=self._cancel_event.is_set,
             )
             self.root.after(0, lambda: self.dbid.set(cfg.get("notion_database_id", "")))
             summary = t("summary_fmt").format(
@@ -1701,6 +1762,15 @@ class App:
             self.root.after(0, self._finish_progress, t("prog_done"))
             if self._notify_pref:
                 desktop_notify(t("notif_done_title"), summary)
+        except core.SyncCancelled as ce:
+            # User-requested stop. Rows written before the stop stay in Notion (and
+            # dedup skips them next run); a DB created mid-sync was already
+            # persisted to config, so surface its id here too so "Notion で開く"
+            # lights up without a restart. No error dialog / notification — this
+            # was a deliberate action.
+            self.root.after(0, lambda: self.dbid.set(cfg.get("notion_database_id", "")))
+            self.log(t("log_cancelled").format(inserted=ce.inserted))
+            self.root.after(0, self._finish_progress, t("prog_cancelled"))
         except Exception as e:
             self.log(t("log_error").format(e=e))
             self.root.after(0, self._finish_progress, t("prog_error"))
@@ -1708,7 +1778,7 @@ class App:
                 desktop_notify(t("notif_err_title"), str(e))
         finally:
             self._syncing = False
-            self.root.after(0, self._update_ready_state)
+            self.root.after(0, self._exit_sync_ui)
 
     def _on_close(self):
         """Confirm before quitting mid-sync; a normal close just exits."""

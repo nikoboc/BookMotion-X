@@ -41,6 +41,32 @@ UA = (
 COLOR_JA = {"yellow": "黄色", "blue": "青", "pink": "ピンク", "orange": "オレンジ"}
 
 
+# ---- cooperative cancellation ------------------------------------------------
+class SyncCancelled(Exception):
+    """Raised from inside a sync when the caller's ``should_cancel()`` turns true.
+
+    The GUI passes ``should_cancel=<threading.Event>.is_set`` and shows a 中断
+    (stop) button during the sync; when the user confirms, the event is set and
+    the next checkpoint in the fetch / insert loops unwinds the sync by raising
+    this. ``inserted`` / ``failed`` carry however many Notion rows were written
+    before the stop (both 0 when cancelled during the Kindle fetch, before any
+    insert), so the caller can report partial progress. Already-written rows are
+    left in place and are skipped by dedup on the next run.
+    """
+
+    def __init__(self, inserted: int = 0, failed: int = 0):
+        super().__init__("sync cancelled")
+        self.inserted = inserted
+        self.failed = failed
+
+
+def _raise_if_cancelled(should_cancel, inserted: int = 0, failed: int = 0) -> None:
+    """Checkpoint: raise SyncCancelled if the caller asked to stop. No-op when
+    ``should_cancel`` is None (e.g. the CLI, which has no stop button)."""
+    if should_cancel and should_cancel():
+        raise SyncCancelled(inserted, failed)
+
+
 # ---- UI language for runtime messages (progress / log / errors) --------------
 # NOTE: this covers only user-facing *messages*. The Notion database schema
 # (property names like 注釈ID and the マーカー色 option names) is data written
@@ -483,7 +509,7 @@ def _next_library_token(html: str) -> str:
     return (nxt.get("value") or "") if nxt else ""
 
 
-def fetch_all_books(session: requests.Session) -> list:
+def fetch_all_books(session: requests.Session, should_cancel=None) -> list:
     """Collect every book.
 
     The first batch (and the CSRF token) come from the main /notebook page;
@@ -510,6 +536,7 @@ def fetch_all_books(session: requests.Session) -> list:
     if csrf:
         headers["anti-csrftoken-a2z"] = csrf
     while token:
+        _raise_if_cancelled(should_cancel)
         r = session.get(
             NOTEBOOK + "?library=list&token=" + token, headers=headers, timeout=30
         )
@@ -539,21 +566,24 @@ def fetch_book_annotations(session: requests.Session, asin: str) -> list:
     return annotations
 
 
-def fetch_kindle(session: requests.Session, limit, log=print, progress=None) -> list:
+def fetch_kindle(session: requests.Session, limit, log=print, progress=None,
+                 should_cancel=None) -> list:
     """Fetch the whole library and each book's annotations.
 
     Returns the books, each with an ``annotations`` list attached. ``limit`` (if
     set) caps how many books are fetched — used by the test-sync. Reports work via
-    the optional ``log`` / ``progress`` callbacks.
+    the optional ``log`` / ``progress`` callbacks. ``should_cancel`` (if given) is
+    polled between books so a user-requested stop unwinds promptly.
     """
     log(t("log_fetch_library"))
     if progress:
         progress(t("prog_fetch_library"), 0, 0)  # count unknown yet → indeterminate
-    books = fetch_all_books(session)
+    books = fetch_all_books(session, should_cancel)
     log(t("log_books_found").format(n=len(books)))
     if limit:
         books = books[:limit]
     for i, b in enumerate(books, 1):
+        _raise_if_cancelled(should_cancel)
         b["annotations"] = fetch_book_annotations(session, b["asin"])
         log(t("log_book_line").format(
             i=i, total=len(books), title=b.get("title") or b["asin"],
@@ -682,10 +712,11 @@ def ensure_schema(token: str, db_id: str) -> None:
     )
 
 
-def query_existing_keys(token: str, db_id: str) -> set:
+def query_existing_keys(token: str, db_id: str, should_cancel=None) -> set:
     """All 注釈ID values already in the database (paged), for dedup on insert."""
     existing, cursor = set(), None
     while True:
+        _raise_if_cancelled(should_cancel)
         body = {"page_size": 100}
         if cursor:
             body["start_cursor"] = cursor
@@ -766,7 +797,7 @@ def build_rows(books: list, today: str) -> list:
 
 
 def notion_sync(token, parent_page_id, database_id, books, today, log=print,
-                progress=None, on_database=None) -> dict:
+                progress=None, on_database=None, should_cancel=None) -> dict:
     """Push highlights to Notion. Returns a result dict incl. the database_id
     used/created, so the caller can persist it.
 
@@ -774,6 +805,10 @@ def notion_sync(token, parent_page_id, database_id, books, today, log=print,
     any highlights are inserted — so the caller can persist the id immediately.
     That way an interrupted first sync resumes into the same database instead of
     creating a duplicate on the next run.
+
+    ``should_cancel`` (if given) is polled before each insert; a stop leaves the
+    rows written so far in place (dedup skips them next run) and raises
+    SyncCancelled carrying the partial insert/fail counts.
     """
     db_id = normalize_id(database_id or "")
     if not db_id:
@@ -788,7 +823,7 @@ def notion_sync(token, parent_page_id, database_id, books, today, log=print,
             on_database(db_id)
 
     ensure_schema(token, db_id)
-    existing = query_existing_keys(token, db_id)
+    existing = query_existing_keys(token, db_id, should_cancel)
     log(t("log_existing").format(n=len(existing)))
 
     rows = build_rows(books, today)
@@ -800,6 +835,7 @@ def notion_sync(token, parent_page_id, database_id, books, today, log=print,
     ok = fail = 0
     min_interval = 0.34  # ~3 req/s
     for i, r in enumerate(fresh):
+        _raise_if_cancelled(should_cancel, inserted=ok, failed=fail)
         t0 = time.time()
         try:
             notion_fetch(
@@ -830,13 +866,18 @@ def notion_sync(token, parent_page_id, database_id, books, today, log=print,
     }
 
 
-def run_sync(cfg: dict, cookies_file=None, limit=None, log=print, progress=None) -> dict:
+def run_sync(cfg: dict, cookies_file=None, limit=None, log=print, progress=None,
+             should_cancel=None) -> dict:
     """End-to-end sync used by both the CLI and the GUI. Persists a newly
-    created database_id back into cfg + config.json."""
+    created database_id back into cfg + config.json.
+
+    ``should_cancel`` is an optional zero-arg predicate polled at loop
+    boundaries; when it returns true the sync unwinds with SyncCancelled. The GUI
+    passes its stop-button event; the CLI leaves it None (no cancellation)."""
     if not cfg.get("notion_token"):
         raise RuntimeError(t("err_no_token"))
     session = build_session(cookies_file, log)
-    books = fetch_kindle(session, limit, log, progress)
+    books = fetch_kindle(session, limit, log, progress, should_cancel)
     if not books:
         raise RuntimeError(t("err_zero_books"))
     _renew_saved_cookies(session)  # keep the stored login fresh for next time
@@ -859,6 +900,7 @@ def run_sync(cfg: dict, cookies_file=None, limit=None, log=print, progress=None)
         log,
         progress,
         on_database=_persist_new_db,
+        should_cancel=should_cancel,
     )
     return res
 

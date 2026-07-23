@@ -133,3 +133,34 @@ def test_build_rows_dedup_key_uses_id_or_composite():
 def test_build_rows_stamps_the_run_date():
     rows = k.build_rows(_books(), "2026-07-22")
     assert all(r["date"] == "2026-07-22" for r in rows)
+
+
+def test_build_rows_dedups_same_annotation_id_within_run():
+    # Regression: a paginated fetch can return the same annotation on adjacent
+    # pages (boundary overlap). Notion-side dedup only compares against the DB, so
+    # build_rows must collapse in-run duplicates or they get inserted twice with
+    # an identical 注釈ID.
+    books = [{
+        "title": "Book A", "author": "A",
+        "annotations": [
+            {"id": "ANN-1", "highlight": "H1", "location": "100"},
+            {"id": "ANN-2", "highlight": "H2", "location": "200"},
+            {"id": "ANN-1", "highlight": "H1", "location": "100"},  # duplicate
+        ],
+    }]
+    rows = k.build_rows(books, "2026-07-22")
+    assert [r["key"] for r in rows] == ["ANN-1", "ANN-2"]  # ANN-1 kept once
+
+
+def test_build_rows_dedups_idless_highlights_by_composite_key():
+    # Id-less duplicates (no annotation id) collapse on the title|location|quote key.
+    books = [{
+        "title": "Book A", "author": "A",
+        "annotations": [
+            {"id": None, "highlight": "same text", "location": "50"},
+            {"id": None, "highlight": "same text", "location": "50"},  # duplicate
+        ],
+    }]
+    rows = k.build_rows(books, "2026-07-22")
+    assert len(rows) == 1
+    assert rows[0]["key"] == "Book A|50|same text"

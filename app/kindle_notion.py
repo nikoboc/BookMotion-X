@@ -524,7 +524,19 @@ def fetch_all_books(session: requests.Session, should_cancel=None) -> list:
     csrf_el = soup.select_one("input[name='anti-csrftoken-a2z']")
     csrf = csrf_el.get("value") if csrf_el else None
 
-    books = parse_books(r.text)
+    # Collect books, skipping any ASIN already seen: the next-page-start token can
+    # overlap the boundary book, so the same book (and all its highlights) would
+    # otherwise be fetched twice. First occurrence wins.
+    books, seen = [], set()
+
+    def _add(new_books):
+        for bk in new_books:
+            asin = bk.get("asin")
+            if asin and asin not in seen:
+                seen.add(asin)
+                books.append(bk)
+
+    _add(parse_books(r.text))
     if not books:
         raise RuntimeError(t("err_fetch_books"))
     token = _next_library_token(r.text)
@@ -540,7 +552,7 @@ def fetch_all_books(session: requests.Session, should_cancel=None) -> list:
         r = session.get(
             NOTEBOOK + "?library=list&token=" + token, headers=headers, timeout=30
         )
-        books.extend(parse_books(r.text))
+        _add(parse_books(r.text))
         token = _next_library_token(r.text)
     return books
 
@@ -550,15 +562,26 @@ def fetch_book_annotations(session: requests.Session, asin: str) -> list:
 
     Loops ``/notebook?asin=...`` with the returned next_token / content-limit
     state until there is no next page (capped at 100 pages as a safety bound).
+
+    Annotations carrying an id are deduped by it: the next-page-start token can
+    overlap the boundary highlight, returning it on two adjacent pages. Id-less
+    annotations are kept as-is (build_rows still dedups them by composite key).
     """
     annotations, token, cls = [], "", ""
+    seen = set()
     for _ in range(100):
         params = {"asin": asin, "contentLimitState": cls}
         if token:
             params["token"] = token
         r = session.get(NOTEBOOK, params=params, timeout=30)
         parsed = parse_annotations(r.text)
-        annotations.extend(parsed["annotations"])
+        for ann in parsed["annotations"]:
+            aid = ann.get("id")
+            if aid is not None:
+                if aid in seen:
+                    continue
+                seen.add(aid)
+            annotations.append(ann)
         cls = parsed["content_limit_state"] or ""
         token = parsed["next_token"] or ""
         if not token:
@@ -769,8 +792,15 @@ def build_rows(books: list, today: str) -> list:
     The key is the annotation id when present, else a
     ``title|location|quote-prefix`` composite so id-less highlights still dedup.
     Rows are sorted by title then location.
+
+    Rows are also deduped by ``key`` *within this run*: the paginated Kindle fetch
+    can return the same annotation on adjacent pages (next-page-start overlaps the
+    boundary item), and Notion-side dedup only compares against rows already in the
+    database — so without this, an annotation fetched twice in one run would be
+    inserted twice, producing identical-注釈ID duplicates. First occurrence wins.
     """
     rows = []
+    seen = set()
     for b in books:
         for a in b.get("annotations", []):
             if not a.get("highlight"):
@@ -789,6 +819,9 @@ def build_rows(books: list, today: str) -> list:
                 "date": today,
             }
             r["key"] = r["id"] or f'{r["title"]}|{r["location"]}|{(r["quote"] or "")[:40]}'
+            if r["key"] in seen:
+                continue
+            seen.add(r["key"])
             rows.append(r)
     rows.sort(
         key=lambda r: (r["title"], r["location"] if r["location"] is not None else float("inf"))

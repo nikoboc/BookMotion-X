@@ -423,14 +423,15 @@ def extract_color(row, header_text):
     """The marker colour as a Japanese label (黄色/青/ピンク/オレンジ), or None.
 
     Prefers the ``kp-notebook-highlight-<color>`` class; falls back to the colour
-    named in the header text when the class is missing.
+    named in the header text when the class is missing. The class is looked for on
+    a descendant AND on ``row`` itself — in the paginated fallback grouping the
+    row *is* the ``highlight-<id>`` div, so the class sits on the row, not below it.
     """
-    colored = row.select_one('[class*="kp-notebook-highlight-"]')
-    if colored:
-        classes = " ".join(colored.get("class", []))
-        m = re.search(r"kp-notebook-highlight-(yellow|blue|pink|orange)", classes)
-        if m:
-            return COLOR_JA[m.group(1)]
+    colored = row.select_one('[class*="kp-notebook-highlight-"]') or row
+    classes = " ".join(colored.get("class", []))
+    m = re.search(r"kp-notebook-highlight-(yellow|blue|pink|orange)", classes)
+    if m:
+        return COLOR_JA[m.group(1)]
     h = header_text or ""
     if "黄" in h:
         return "黄色"
@@ -443,26 +444,50 @@ def extract_color(row, header_text):
     return None
 
 
+def _location_from_header(header_text):
+    """Recover the location/page number from a header like
+    ``黄色のハイライト | 位置: 3,213`` (also ``ページ: 12`` / ``Location: 3213``).
+
+    Used only when the hidden ``#kp-annotation-location`` input is missing. Returns
+    the digits (commas stripped) or None.
+    """
+    if not header_text:
+        return None
+    m = re.search(r"(?:位置|ページ|Location|Page)\s*[:：]\s*([\d,]+)", header_text)
+    return m.group(1).replace(",", "") if m else None
+
+
 def parse_annotations(html: str) -> dict:
     """Parse one annotations page into ``{annotations, next_token, content_limit_state}``.
 
     Each annotation carries id/highlight/note/header/color/location. ``next_token``
     drives the server-side pagination and ``content_limit_state`` is echoed back on
-    the next request. A fallback selector handles pages whose container id differs.
+    the next request.
+
+    The first ``?asin=`` page arrives as a full document with the
+    ``#kp-notebook-annotations`` wrapper, but every *subsequent* (paginated) page
+    is a bare fragment with no wrapper — just the annotation divs. So we group the
+    wrapper's direct children when it's present, else the document's own top-level
+    annotation divs. Without the ``or soup``, paginated highlights fell through to
+    the deep fallback and came back with no location and no colour (both live in a
+    sibling of the highlight span, outside the narrow per-highlight scope).
     """
     soup = BeautifulSoup(html, "html.parser")
     container = soup.select_one("#kp-notebook-annotations")
-    rows = []
-    if container:
-        rows = [
-            d
-            for d in container.find_all("div", recursive=False)
-            if d.select_one("#highlight") or d.select_one("#note")
-        ]
+    scope = container or soup
+    rows = [
+        d
+        for d in scope.find_all("div", recursive=False)
+        if d.select_one("#highlight") or d.select_one("#note")
+    ]
     if not rows:
+        # Last resort for an unanticipated structure: walk each highlight/note up
+        # to its annotation wrapper (a-spacing-base) — NOT the nearest a-row, which
+        # is the narrow highlight cell that lacks the location input and header.
         seen = []
         for el in soup.select('[id="highlight"], [id="note"]'):
-            wrap = el.find_parent("div", class_="a-row") or el.parent
+            wrap = (el.find_parent("div", class_="a-spacing-base")
+                    or el.find_parent("div", class_="a-row") or el.parent)
             if wrap is not None and wrap not in seen:
                 seen.append(wrap)
         rows = seen
@@ -480,6 +505,7 @@ def parse_annotations(html: str) -> dict:
         if not highlight and not note_text:
             continue
         header_text = re.sub(r"\s+", " ", header.get_text()).strip() if header else None
+        location = (loc.get("value") if loc else None) or _location_from_header(header_text)
         annotations.append(
             {
                 "id": row.get("id") or None,
@@ -487,7 +513,7 @@ def parse_annotations(html: str) -> dict:
                 "note": note_text or None,
                 "header": header_text,
                 "color": extract_color(row, header_text),
-                "location": loc.get("value") if loc else None,
+                "location": location,
             }
         )
 

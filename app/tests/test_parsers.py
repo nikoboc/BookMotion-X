@@ -120,3 +120,90 @@ def test_next_library_token_present_and_absent():
     html = '<input class="kp-notebook-library-next-page-start" value="TOK123"/>'
     assert k._next_library_token(html) == "TOK123"
     assert k._next_library_token("<div>nothing</div>") == ""
+
+
+# ---- pagination fragments (no #kp-notebook-annotations wrapper) --------------
+# The first ?asin= page is a full document WITH the #kp-notebook-annotations
+# wrapper; every subsequent (paginated) page is a bare fragment WITHOUT it — just
+# the annotation divs. The location input and header live in a sibling of the
+# highlight span, so grouping must reach the whole annotation div, not the narrow
+# highlight cell, or location + colour are lost (the real-world bug).
+def _annotation_div(annid, loc, color_cls, text, note_text=None):
+    if note_text is not None:
+        note = (f'<div id="note-{annid}" class="a-row a-spacing-top-base kp-notebook-note">'
+                f'<span id="note-label">メモ</span><span id="note">{note_text}</span></div>')
+    else:
+        note = ('<div id="note-" class="a-row a-spacing-top-base kp-notebook-note aok-hidden">'
+                '<span id="note-label">メモ</span><span id="note"></span></div>')
+    return (
+        f'<div id="{annid}" class="a-row a-spacing-base">'
+        f'<div class="a-column a-span10 kp-notebook-row-separator">'
+        f'<div class="a-row"><input type="hidden" value="{loc}" id="kp-annotation-location"/>'
+        f'<div class="a-column a-span8">'
+        f'<span id="annotationHighlightHeader">色のハイライト | 位置: {loc}</span>'
+        f'<span id="annotationNoteHeader" class="aok-hidden">メモ | 位置: {loc}</span>'
+        f'</div></div>'
+        f'<div class="a-row a-spacing-top-medium"><div class="a-column a-span10">'
+        f'<div id="highlight-{annid}" class="a-row kp-notebook-highlight kp-notebook-highlight-{color_cls}">'
+        f'<span id="highlight">{text}</span><div></div></div>'
+        f'{note}'
+        f'</div></div></div></div>'
+    )
+
+
+# Mirrors highlightapiresponse2.html: leading token inputs, two annotation divs
+# (the first with a child note), then the empty-annotations-pane placeholder — all
+# top-level, no #kp-notebook-annotations wrapper.
+_FRAGMENT = (
+    '<input type="hidden" name="" value="CLS1" class="kp-notebook-content-limit-state"/>'
+    '<input type="hidden" name="" class="kp-notebook-annotations-next-page-start"/>'
+    + _annotation_div("ANN1", "3213", "yellow", "first highlight", note_text="my note")
+    + _annotation_div("ANN2", "3549", "pink", "second highlight")
+    + '<div id="empty-annotations-pane" class="a-row aok-hidden"><span>make a note?</span></div>'
+)
+
+
+def test_parse_annotations_wrapperless_fragment_keeps_location_and_color():
+    res = k.parse_annotations(_FRAGMENT)
+    anns = res["annotations"]
+    assert len(anns) == 2  # the empty-annotations-pane is not an annotation
+    assert anns[0]["location"] == "3213" and anns[0]["color"] == "黄色"
+    assert anns[0]["note"] == "my note"        # child note stays attached, not split
+    assert anns[1]["location"] == "3549" and anns[1]["color"] == "ピンク"
+    assert res["content_limit_state"] == "CLS1"
+    assert res["next_token"] == ""             # empty next-page input -> last page
+
+
+def test_parse_annotations_with_wrapper_still_works():
+    html = ('<div id="kp-notebook-annotations">'
+            + _annotation_div("ANN1", "12", "yellow", "hl")
+            + "</div>")
+    anns = k.parse_annotations(html)["annotations"]
+    assert len(anns) == 1
+    assert anns[0]["location"] == "12" and anns[0]["color"] == "黄色"
+
+
+def test_parse_annotations_uses_header_location_when_input_missing():
+    # No #kp-annotation-location input -> recover the number from the header text.
+    html = ('<div id="ANN" class="a-row a-spacing-base">'
+            '<span id="annotationHighlightHeader">黄色のハイライト | 位置: 999</span>'
+            '<div id="highlight-ANN" class="a-row kp-notebook-highlight kp-notebook-highlight-yellow">'
+            '<span id="highlight">text</span></div></div>')
+    anns = k.parse_annotations(html)["annotations"]
+    assert anns[0]["location"] == "999" and anns[0]["color"] == "黄色"
+
+
+def test_extract_color_reads_class_on_the_row_element_itself():
+    # In the deep fallback the row *is* the highlight div, so the colour class sits
+    # on the row, not a descendant.
+    inner = _row('<div class="a-row kp-notebook-highlight kp-notebook-highlight-orange">'
+                 '<span id="highlight">x</span></div>').select_one("div")
+    assert k.extract_color(inner, None) == "オレンジ"
+
+
+def test_location_from_header_recovers_number_when_input_missing():
+    assert k._location_from_header("黄色のハイライト | 位置: 3,213") == "3213"
+    assert k._location_from_header("メモ | ページ: 12") == "12"
+    assert k._location_from_header("Yellow highlight | Location: 4567") == "4567"
+    assert k._location_from_header("no number here") is None
+    assert k._location_from_header(None) is None

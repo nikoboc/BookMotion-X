@@ -41,12 +41,12 @@ Kindle のハイライト（`read.amazon.co.jp/notebook`）を取得し、**Noti
 │
 ├── mac-app/               【実装B・Mac 固有】起動とパッケージング（../app を参照）
 │   ├── BUILD_RUN_mac.md   macOS でのビルド→起動→設定→実行の詳細手順
-│   ├── run.command        ダブルクリック起動（初回に venv+依存を自動構築）
+│   ├── run.command        ダブルクリックで GUI 起動（初回に venv+依存を自動構築）
 │   └── build_mac.command  PyInstaller で Booklight.app をビルド（要 Mac）
 │
 └── win-app/               【実装B・Windows 固有】起動とパッケージング（..\app を参照）
     ├── BUILD_RUN_win.md   Windows でのビルド→起動→設定→実行の詳細手順
-    ├── run.bat            ダブルクリック起動（初回に venv+依存を自動構築）
+    ├── run.bat            ダブルクリックで CLI 実行（初回に venv+依存を自動構築）
     └── build_win.bat      PyInstaller で Booklight.exe をビルド（要 Windows）
 ```
 
@@ -83,10 +83,10 @@ Kindle のハイライト（`read.amazon.co.jp/notebook`）を取得し、**Noti
 詳細は [extension/README.md](extension/README.md)。
 
 ### 実装B：Python アプリ（Booklight / Mac・Windows）
-1. ビルド済みの **Booklight.app（Mac）/ Booklight.exe（Win）** を起動、または `mac-app/run.command`・`win-app/run.bat` をダブルクリック、あるいは `app/gui.py` を起動。
+1. GUI を起動する。**Booklight.app（Mac）/ Booklight.exe（Win）** をダブルクリック、または Mac は `mac-app/run.command` をダブルクリック（ソースから起動）、あるいは `app/` で `python3 gui.py`（Windows は `py -3 gui.py`）。<br>※ `win-app/run.bat` は GUI ではなく CLI（デバッグ用）です。
 2. トークン・親ページを入力。
 3. **「Kindle にログイン」**を押すとアプリ内ブラウザ（Mac: WKWebView / Win: WebView2）が開くので、いつも通りサインイン（2FA も可）。Cookie は自動保存され、以後は必要に応じて自動更新される。
-4. **「Notion へ同期」**を押す。
+4. **「Notion へ同期」**を押す（同期中は「中断」ボタンで、確認を挟んで中止できます）。
 
 > CLI（ターミナル実行）だけは従来どおり書き出した `cookies.txt` を使います（下記の各 BUILD_RUN 参照）。
 

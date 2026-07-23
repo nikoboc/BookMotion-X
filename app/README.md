@@ -53,11 +53,11 @@ CLI で使う場合のみ `config.json` を用意します。**置き場所は `
 
 **方法1: GUIアプリ（おすすめ）**
 - ビルド済みの **`Booklight.app`（Mac）/ `Booklight.exe`（Win）** を起動、または `app/` で `python3 gui.py` / `py -3 gui.py`
-- 窓に **トークン / 親ページURL** を入力し、**「Kindle にログイン」**でアプリ内ブラウザからサインイン → 「保存」→「Notion へ同期」。ログも窓に表示（Cookie は以後自動更新）
+- 窓に **トークン / 親ページURL** を入力し、**「Kindle にログイン」**でアプリ内ブラウザからサインイン → 「保存」→「Notion へ同期」。同期中は「中断」ボタンで確認を挟んで中止可。ログも窓に表示（Cookie は以後自動更新）
 
-**方法2: ダブルクリック CLI**
-- Mac: [`../mac-app/run.command`](../mac-app/run.command) ／ Windows: [`../win-app/run.bat`](../win-app/run.bat) をダブルクリック
-- 初回だけ venv と依存を自動セットアップ→実行（venv は各 OS フォルダ内に作られます）。設定は `app/config.json`
+**方法2: ダブルクリックで起動（初回だけ venv と依存を自動セットアップ。venv は各 OS フォルダ内）**
+- **Mac**: [`../mac-app/run.command`](../mac-app/run.command) をダブルクリック → **GUI がソースから起動**（方法1と同じ画面。`config.json` 不要）
+- **Windows**: [`../win-app/run.bat`](../win-app/run.bat) をダブルクリック → **CLI**（`kindle_notion.py`）。CLI なので `app/config.json` と、`-c` で渡す `cookies.txt` が必要（引数なしのダブルクリックは使用法エラーになります。Windows で GUI を出すなら方法1の `py -3 gui.py`）
 
 **方法3: ターミナル**
 - 初回のみ venv と依存をセットアップ（`app/` 内で）:
@@ -92,14 +92,15 @@ python kindle_notion.py -c cookies.txt --limit 1  # 先頭1冊だけ（テスト
 
 ## テスト
 
-`tests/` に `pytest` のユニットテストがあります（ネットワーク不要のコア関数のみ対象：
-パーサ・i18n・設定パス/移行・Notion 整形）。`app/` 内で実行:
+`tests/` に `pytest` のユニットテストがあります（ネットワーク不要。パーサ・i18n・設定パス/移行・Notion 整形に加え、GUI の Cookie 状態ロジックも対象）。`app/` 内で実行:
 
 ```bash
 python -m venv .venv
 ./.venv/bin/pip install -r requirements-dev.txt     # Win: .\.venv\Scripts\pip install ...
 ./.venv/bin/pytest                                  # Win: .\.venv\Scripts\pytest
 ```
+
+> `test_cookie_status.py` が `gui` を import するため、`requirements-dev.txt` には `customtkinter` を含めています（テストではウィンドウ生成もネットワークも伴いません）。
 
 ## データベースの列（左→右）
 
